@@ -18,3 +18,11 @@
 
 # Modify hostname
 #sed -i 's/OpenWrt/P3TERX-Router/g' package/base-files/files/bin/config_generate
+#!/bin/bash
+
+# 添加 kmod-ubi 和 kmod-ubifs 模块
+echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
+echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
+
+# 确保 trx 工具被启用（用于生成带头部的固件）
+echo "CONFIG_PACKAGE_trx=y" >> .config
