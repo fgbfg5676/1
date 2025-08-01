@@ -26,3 +26,19 @@ echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 
 # 确保 trx 工具被启用（用于生成带头部的固件）
 echo "CONFIG_PACKAGE_trx=y" >> .config
+# 定位 generic.mk 文件（OpenWrt 源码中的路径）
+GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+
+# 为 mobipromo_cm520-79f 设备添加 trx 固件生成规则
+# 先检查设备定义是否已存在，避免重复添加
+if ! grep -q "DEVICE_mobipromo_cm520-79f" "$GENERIC_MK"; then
+    # 若设备定义不存在（通常不会，此处为兜底），可忽略或手动补充
+    echo "Warning: Device mobipromo_cm520-79f not found in $GENERIC_MK"
+else
+    # 在设备定义中插入 trx 生成规则
+    # 使用 sed 命令在设备定义块内添加 IMAGE/trx 逻辑
+    sed -i '/define Device\/mobipromo_cm520-79f/,/endef/ {
+        /IMAGE\//!b
+        a\  IMAGE/trx := append-kernel | pad-to $$(KERNEL_SIZE) | append-rootfs | trx -o $@
+    }' "$GENERIC_MK"
+fi
