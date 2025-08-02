@@ -42,6 +42,34 @@ else
     exit 1
 fi
 
-# 可选：修改默认IP、主机名等
-# sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
-# sed -i 's/OpenWrt/CM520-79F/g' package/base-files/files/bin/config_generate
+# 集成 AdGuardHome 核心
+echo "开始集成 AdGuardHome 核心集成..."
+# 1. 定义安装路径（源码路径对应固件中的 /usr/bin/）
+ADGUARD_INSTALL_DIR="package/luci-app-adguardhome/root/usr/bin"
+mkdir -p "$ADGUARD_INSTALL_DIR"
+
+# 2. 设备架构（根据你的设备填写，ipq40xx 通常为 armv7）
+ARCH="armv7"
+
+# 3. 下载链接（根据架构选择，armv7 对应 linux_armv7 版本）
+ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.64/AdGuardHome_linux_armv7.tar.gz"
+
+# 4. 下载并解压
+if wget -q -O /tmp/adguard.tar.gz "$ADGUARD_URL"; then
+    # 解压到临时目录
+    tar zxf /tmp/adguard.tar.gz -C /tmp
+    # 复制核心文件到目标目录
+    cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_INSTALL_DIR/"
+    # 赋予执行权限
+    chmod +x "$ADGUARD_INSTALL_DIR/AdGuardHome"
+    # 清理临时文件
+    rm -rf /tmp/adguard.tar.gz /tmp/AdGuardHome
+    echo "AdGuardHome 核心集成成功"
+else
+    echo "Error: 下载 AdGuardHome 核心失败"
+    exit 1
+fi
+
+# 修改默认IP、主机名等
+sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
+sed -i 's/OpenWrt/CM520-79F/g' package/base-files/files/bin/config_generate
