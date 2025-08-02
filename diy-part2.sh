@@ -21,19 +21,26 @@ echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
 
-# 下载并部署 mobipromo_cm520-79f 的 DTS 文件
+# 使用仓库根目录的本地 DTS 文件（qcom-ipq4019-cm520-79f.dts）
 DTS_DIR="target/linux/ipq40xx/dts"
-DTS_FILE="qcom-ipq40xx-mobipromo_cm520-79f.dts"
-DTS_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
+# 本地 DTS 文件名（仓库根目录中实际存在的文件）
+LOCAL_DTS="qcom-ipq4019-cm520-79f.dts"
+# 目标 DTS 文件名（需与设备定义匹配，保持原命名）
+TARGET_DTS="qcom-ipq40xx-mobipromo_cm520-79f.dts"
 
+# 创建 DTS 目录（若不存在）
 mkdir -p "$DTS_DIR"
-echo "Downloading DTS file for mobipromo_cm520-79f..."
-if wget $WGET_OPTS -O "$DTS_DIR/$DTS_FILE" "$DTS_URL"; then
-    echo "DTS file downloaded successfully: $DTS_DIR/$DTS_FILE"
+
+# 检查本地 DTS 文件是否存在
+if [ -f "$LOCAL_DTS" ]; then
+    # 复制本地文件到目标目录并保持目标文件名
+    cp "$LOCAL_DTS" "$DTS_DIR/$TARGET_DTS"
+    echo "已将本地 DTS 文件复制到：$DTS_DIR/$TARGET_DTS"
 else
-    echo "Error: Failed to download DTS file from $DTS_URL"
+    echo "错误：仓库根目录未找到 DTS 文件 $LOCAL_DTS，请检查文件是否存在"
     exit 1
 fi
+
 
 # 为 mobipromo_cm520-79f 设备添加 trx 生成规则
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
