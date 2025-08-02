@@ -5,49 +5,51 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 #
 
-# 配置wget超时和重试参数，增强网络兼容性
-WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
-
-# 定义必要必要目录变量
-OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
-ARCH="armv7"  # 适配mobipromo_cm520-79f架构
-ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
-
-# 确保核心目录存在
-mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR"
-
-# 添加所需内核模块和trx工具
+# 添加所需内核模块和 trx 工具
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
 
-# 使用仓库根目录的本地DTS文件
+# 下载并应用 mobipromo_cm520-79f 的 DTS 补丁
 DTS_DIR="target/linux/ipq40xx/dts"
-LOCAL_DTS="qcom-ipq4019-cm520-79f.dts"  # 仓库根目录中的DTS文件
-TARGET_DTS="qcom-ipq40xx-mobipromo_cm520-79f.dts"  # 目标文件名（与设备定义匹配）
+DTS_PATCH="mobipromo_cm520-79f.dts.patch"
+DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"  # 明确为补丁文件
 
-# 创建DTS目录（若不存在）
+# 创建 DTS 目录（若不存在）
 mkdir -p "$DTS_DIR"
 
-# 检查并复制本地DTS文件（使用绝对路径确保定位正确）
-LOCAL_DTS_PATH="$GITHUB_WORKSPACE/$LOCAL_DTS"
-if [ -f "$LOCAL_DTS_PATH" ]; then
-    cp "$LOCAL_DTS_PATH" "$DTS_DIR/$TARGET_DTS"
-    echo "已将本地DTS文件复制到：$DTS_DIR/$TARGET_DTS"
+# 下载补丁文件
+echo "Downloading DTS patch for mobipromo_cm520-79f..."
+if wget -q -O "$DTS_DIR/$DTS_PATCH" "$DTS_PATCH_URL"; then
+    echo "DTS patch downloaded successfully: $DTS_DIR/$DTS_PATCH"
 else
-    echo "错误：未找到DTS文件 $LOCAL_DTS_PATH，请检查仓库根目录"
+    echo "Error: Failed to download DTS patch from $DTS_PATCH_URL"
     exit 1
 fi
 
-# 为mobipromo_cm520-79f设备添加trx生成规则
+# 应用补丁到目标DTS文件（假设基于qcom-ipq40xx-generic.dtsi修改）
+# 注意：需根据补丁实际目标文件调整下面的路径
+TARGET_DTS="qcom-ipq40xx-generic.dtsi"
+if [ -f "$DTS_DIR/$TARGET_DTS" ]; then
+    echo "Applying DTS patch to $TARGET_DTS..."
+    patch -d "$DTS_DIR" -p1 < "$DTS_DIR/$DTS_PATCH"
+    if [ $? -eq 0 ]; then
+        echo "DTS patch applied successfully"
+    else
+        echo "Error: Failed to apply DTS patch"
+        exit 1
+    fi
+else
+    echo "Error: Target DTS file $DTS_DIR/$TARGET_DTS not found"
+    exit 1
+fi
+
+# 为 mobipromo_cm520-79f 设备添加 trx 生成规则
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 if grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
-    # 替换现有规则（避免重复添加）
-    sed -i '/define Device\/mobipromo_cm520-79f/ {
-        N;N;N;  # 跳过现有行
-        s/define Device\/mobipromo_cm520-79f.*/define Device\/mobipromo_cm520-79f\n  KERNEL_SIZE := 4096k\n  ROOTFS_SIZE := 16384k/
-    }' "$GENERIC_MK"
-    # 添加TRX生成规则
+    # 插入分区大小（根据DTS实际分区定义调整）
+    sed -i '/define Device\/mobipromo_cm520-79f/ a\  KERNEL_SIZE := 4096k\n  ROOTFS_SIZE := 16384k' "$GENERIC_MK"
+    # 插入 trx 固件生成逻辑
     sed -i '/define Device\/mobipromo_cm520-79f/,/endef/ {
         /IMAGE\// a\  IMAGE/trx := append-kernel | pad-to $$(KERNEL_SIZE) | append-rootfs | trx -o $@
     }' "$GENERIC_MK"
