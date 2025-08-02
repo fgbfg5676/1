@@ -132,8 +132,8 @@ echo "AdGuardHome 核心集成步骤完成"
 
 # diy-part2.sh（After Update feeds）
 
-# 进入 openwrt 源码目录（适配你的编译环境）
-cd openwrt || exit
+# 修正为：使用当前目录（或根据实际路径调整）
+SRC_DIR="."  # 源码为源码根目录，根据环境可改为具体路径
 
 # 1. 动态创建 package 目录（模板没有，手动创建）
 mkdir -p package/custom
