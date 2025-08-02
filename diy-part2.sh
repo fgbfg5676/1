@@ -59,15 +59,45 @@ wget $WGET_OPTS -O "$OPENCLASH_CORE_DIR/clash_meta.gz" "$MIHOMO_URL"
 gunzip -f "$OPENCLASH_CORE_DIR/clash_meta.gz"
 chmod +x "$OPENCLASH_CORE_DIR/clash_meta"
 
-# -------------------- AdGuardHome 核心集成 --------------------
-echo "Integrating AdGuardHome core..."
+# -------------------- 集成AdGuardHome核心 --------------------
+echo "开始集成AdGuardHome核心..."
+
+# 清理历史文件
 rm -rf "$ADGUARD_DIR/AdGuardHome" "$ADGUARD_DIR/AdGuardHome.tar.gz"
-ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.59/AdGuardHome_linux_armv7.tar.gz"
-wget $WGET_OPTS -O "$ADGUARD_DIR/AdGuardHome.tar.gz" "$ADGUARD_URL"
-tar -zxf "$ADGUARD_DIR/AdGuardHome.tar.gz" -C "$ADGUARD_DIR"
-mv "$ADGUARD_DIR/AdGuardHome_linux_armv7/AdGuardHome" "$ADGUARD_DIR/"
-chmod +x "$ADGUARD_DIR/AdGuardHome"
-rm -rf "$ADGUARD_DIR/AdGuardHome_linux_armv7" "$ADGUARD_DIR/AdGuardHome.tar.gz"
+
+# 下载AdGuardHome核心
+ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest |
+              grep "browser_download_url.*linux_armv7" |
+              cut -d '"' -f 4)
+
+if [ -n "$ADGUARD_URL" ]; then
+    echo "下载AdGuardHome: $ADGUARD_URL"
+    if wget $WGET_OPTS -O "$ADGUARD_DIR/AdGuardHome.tar.gz" "$ADGUARD_URL"; then
+        # 解压到临时目录，查看实际目录结构
+        TMP_DIR=$(mktemp -d)
+        tar -zxf "$ADGUARD_DIR/AdGuardHome.tar.gz" -C "$TMP_DIR" --warning=no-unknown-keyword
+        
+        # 查找解压后的AdGuardHome可执行文件路径（兼容不同目录结构）
+        ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
+        if [ -n "$ADG_EXE" ]; then
+            # 复制可执行文件到目标目录
+            cp "$ADG_EXE" "$ADGUARD_DIR/"
+            chmod +x "$ADGUARD_DIR/AdGuardHome"
+            echo "AdGuardHome核心复制成功"
+        else
+            echo "警告：未找到AdGuardHome可执行文件"
+        fi
+        
+        # 清理临时文件
+        rm -rf "$TMP_DIR" "$ADGUARD_DIR/AdGuardHome.tar.gz"
+    else
+        echo "警告：AdGuardHome下载失败"
+    fi
+else
+    echo "警告：未找到AdGuardHome核心地址"
+fi
+
+echo "AdGuardHome核心集成完成"
 
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
