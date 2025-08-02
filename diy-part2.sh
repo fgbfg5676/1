@@ -129,32 +129,33 @@ fi
 echo "AdGuardHome 核心集成步骤完成"
 
 # -------------------- 集成 sirpdboy 的插件 --------------------
-# 1. 动态创建 package 目录（若不存在）
-mkdir -p package
 
-# 2. 从 sirpdboy 仓库克隆需要的插件（以具体插件仓库为例）
-# 假设插件在 https://github.com/sirpdboy/luci-app-watchdog 和 https://github.com/sirpdboy/luci-app-partexp
-PLUGIN1_REPO="https://github.com/sirpdboy/luci-app-watchdog"
-PLUGIN2_REPO="https://github.com/sirpdboy/luci-app-partexp"
+# diy-part2.sh（After Update feeds）
 
-# 克隆插件到 package 目录
-git clone --depth 1 $PLUGIN1_REPO package/luci-app-partexp
-git clone --depth 1 $PLUGIN2_REPO package/luci-app-watchdog
+# 进入 openwrt 源码目录（适配你的编译环境）
+cd openwrt || exit
 
-# 3. 若插件在集合仓库的子目录中（例如 sirpdboy-package 仓库下的某个文件夹），需单独提取
-# 示例：从 sirpdboy-package 仓库中提取插件（如果步骤2已添加该源，可跳过此步）
-# git clone --depth 1 https://github.com/sirpdboy/sirpdboy-package package/sirpdboy
-# mv package/sirpdboy/luci-app-partexp package/  # 移动插件到 package 根目录
-# mv package/sirpdboy/luci-app-watchdog package/
-# rm -rf package/sirpdboy  # 清理残留
+# 1. 动态创建 package 目录（模板没有，手动创建）
+mkdir -p package/custom
 
-# 4. 更新 feeds 确保插件被识别
+# 2. 清理旧的插件目录（避免缓存问题）
+rm -rf package/custom/luci-app-watchdog
+rm -rf package/custom/luci-app-partexp
+
+# 3. 直接从插件官方仓库克隆源码（确保目录存在）
+# 插件1：luci-app-watchdog
+git clone --depth 1 https://github.com/sirpdboy/luci-app-watchdog package/custom/luci-app-watchdog
+
+# 插件2：luci-app-partexp
+git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp package/custom/luci-app-partexp
+
+# 4. 更新 feeds 并安装插件（刷新配置，确保系统识别新添加的插件）
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 5. 强制在 .config 中启用插件（替换为实际插件名）
-echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
+# 5. 强制在 .config 中启用插件（确保编译时包含）
 echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
+echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
 # 修改默认IP、主机名等
 sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
