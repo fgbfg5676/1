@@ -11,12 +11,11 @@ set -e  # 遇到错误立即退出
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 
-OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
-ADGUARD_DIR="files/usr/bin"  # 统一路径
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
-mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$DTS_DIR"
+mkdir -p "$DTS_DIR"
+
 
 # -------------------- 内核模块与工具配置 --------------------
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
@@ -53,136 +52,6 @@ TARGET_DEVICES += mobipromo_cm520-79f
 EOF
 fi
 
-# -------------------- OpenClash Meta 内核集成 --------------------
-echo "🚀 开始集成 OpenClash Meta 内核..."
-
-# 创建临时目录
-TMP_DIR=$(mktemp -d)
-cleanup() {
-    if [ -d "$TMP_DIR" ]; then
-        rm -rf "$TMP_DIR"
-        echo "🧹 已清理临时文件"
-    fi
-}
-trap cleanup EXIT
-
-echo "📡 正在获取 mihomo 最新版本信息..."
-
-# 获取最新版本
-LATEST_RELEASE=$(curl -s --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
-    "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest")
-
-if [ -n "$LATEST_RELEASE" ]; then
-    LATEST_TAG=$(echo "$LATEST_RELEASE" | grep -o '"tag_name": *"[^"]*"' | \
-        sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-else
-    echo "❌ 无法获取最新版本，使用备用方案..."
-    LATEST_TAG=$(curl -s --retry 3 --connect-timeout 10 \
-        "https://github.com/MetaCubeX/mihomo/releases/latest" | \
-        grep -o 'tag/v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -n1 | cut -d'/' -f2)
-fi
-
-if [ -z "$LATEST_TAG" ]; then
-    echo "❌ 无法获取版本信息，跳过 Meta 内核"
-else
-    echo "📦 最新版本: $LATEST_TAG"
-    
-    # 构建下载链接
-    MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/${LATEST_TAG}/mihomo-linux-${ARCH}-${LATEST_TAG}.gz"
-    
-    echo "⬇️  正在下载 mihomo 内核..."
-    if wget $WGET_OPTS -O "$TMP_DIR/clash_meta.gz" "$MIHOMO_URL"; then
-        if file "$TMP_DIR/clash_meta.gz" | grep -q gzip; then
-            echo "📂 正在解压..."
-            gunzip -f "$TMP_DIR/clash_meta.gz"
-            mv "$TMP_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash_meta"
-            chmod +x "$OPENCLASH_CORE_DIR/clash_meta"
-            echo "✅ Meta 内核安装成功"
-        else
-            echo "❌ 下载文件格式错误，跳过 Meta 内核"
-        fi
-    else
-        echo "❌ Meta 内核下载失败，跳过"
-    fi
-fi
-
-# -------------------- AdGuardHome 核心集成 --------------------
-echo "🚀 开始集成 AdGuardHome..."
-
-# 获取最新版本
-echo "📡 正在获取 AdGuardHome 最新版本信息..."
-AGH_VERSION=$(curl -s "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-
-if [ -z "$AGH_VERSION" ]; then
-    echo "❌ 无法获取AdGuardHome版本信息，使用备用版本"
-    AGH_VERSION="v0.107.52"
-fi
-
-echo "📦 版本: $AGH_VERSION"
-
-# 构建下载链接
-AGH_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/$AGH_VERSION/AdGuardHome_linux_${ARCH}.tar.gz"
-
-# 下载AdGuardHome
-echo "⬇️ 正在下载 AdGuardHome..."
-AGH_SUCCESS=false
-
-# 尝试多个镜像下载
-for mirror in \
-    "$AGH_URL" \
-    "${AGH_URL/github.com/mirror.ghproxy.com/github.com}" \
-    "${AGH_URL/github.com/ghproxy.com/github.com}"; do
-    
-    echo "尝试: $mirror"
-    if wget $WGET_OPTS -O "$TMP_DIR/AdGuardHome.tar.gz" "$mirror"; then
-        if file "$TMP_DIR/AdGuardHome.tar.gz" | grep -q "gzip compressed"; then
-            AGH_SUCCESS=true
-            break
-        fi
-    fi
-done
-
-if [ "$AGH_SUCCESS" = true ]; then
-    echo "📂 正在解压 AdGuardHome..."
-    cd "$TMP_DIR"
-    tar -xzf AdGuardHome.tar.gz
-    cd - > /dev/null  # 返回到 openwrt 目录
-    
-    if [ -f "$TMP_DIR/AdGuardHome/AdGuardHome" ]; then
-        # 安装二进制文件
-        cp "$TMP_DIR/AdGuardHome/AdGuardHome" "$ADGUARD_DIR/"
-        chmod +x "$ADGUARD_DIR/AdGuardHome"
-        
-        # 创建配置目录
-        mkdir -p "files/etc/AdGuardHome"
-        
-        # 创建启动脚本
-        mkdir -p "files/etc/init.d"
-        cat > "files/etc/init.d/adguardhome" << 'EOF'
-#!/bin/sh /etc/rc.common
-
-START=99
-USE_PROCD=1
-PROG=/usr/bin/AdGuardHome
-CONFDIR=/etc/AdGuardHome
-
-start_service() {
-    mkdir -p $CONFDIR
-    procd_open_instance adguardhome
-    procd_set_param command $PROG -c $CONFDIR -w $CONFDIR
-    procd_set_param respawn
-    procd_close_instance
-}
-EOF
-        chmod +x "files/etc/init.d/adguardhome"
-        
-        echo "✅ AdGuardHome 安装成功"
-    else
-        echo "❌ 解压后未找到 AdGuardHome 可执行文件"
-    fi
-else
-    echo "❌ AdGuardHome 下载失败"
-fi
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
@@ -250,7 +119,5 @@ echo "🎉 DIY脚本执行完成！"
 echo "📋 执行摘要："
 echo "   ✅ DTS 补丁已应用"
 echo "   ✅ 设备规则已添加"
-echo "   ✅ Meta 内核已集成"
-echo "   ✅ AdGuardHome 已集成"
 echo "   ✅ 插件已安装"
 echo "   ✅ 默认配置已修改 (IP: 192.168.5.1, 主机名: CM520-79F)"
