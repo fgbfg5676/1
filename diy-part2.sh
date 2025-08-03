@@ -148,9 +148,9 @@ if [ "$AGH_SUCCESS" = true ]; then
     tar -xzf AdGuardHome.tar.gz
     
     if [ -f "AdGuardHome/AdGuardHome" ]; then
-        # 安装二进制文件
-        cp "AdGuardHome/AdGuardHome" "../$ADGUARD_DIR/"
-        chmod +x "../$ADGUARD_DIR/AdGuardHome"
+        # 安装二进制文件 (使用绝对路径)
+        cp "AdGuardHome/AdGuardHome" "$ADGUARD_DIR/"
+        chmod +x "$ADGUARD_DIR/AdGuardHome"
         
         # 创建配置目录
         mkdir -p "files/etc/AdGuardHome"
