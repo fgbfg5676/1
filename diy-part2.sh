@@ -107,63 +107,73 @@ else
 fi
 
 # -------------------- AdGuardHome 核心集成 --------------------
-echo "🚀 开始集成 AdGuardHome 核心..."
-
-# 设置架构 - 确保匹配 ARMv7
-AGH_ARCH="linux_arm"  # ARMv7 对应 linux_arm，不是 arm64
-
-echo "📡 正在获取 AdGuardHome 最新版本信息..."
-
-# 获取最新版下载链接
-ADGUARD_URL=$(curl -s --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
-    https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | \
-    grep -o '"browser_download_url": *"[^"]*"' | \
-    grep "$AGH_ARCH" | \
-    head -n1 | \
-    sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
-
-if [ -n "$ADGUARD_URL" ]; then
-    echo "🔍 检查架构匹配: 期望 $AGH_ARCH, 实际下载 $(echo "$ADGUARD_URL" | grep -o 'linux_[^.]*')"
+# 集成AdGuardHome
+integrate_adguardhome() {
+    log_info "🚀 开始集成 AdGuardHome 核心..."
     
-    # 验证下载的架构是否正确
-    if echo "$ADGUARD_URL" | grep -q "arm64" && [ "$AGH_ARCH" = "linux_arm" ]; then
-        echo "⚠️  警告：架构不匹配，ARMv7 设备下载了 ARM64 版本"
-        # 强制使用正确的架构
-        ADGUARD_URL=$(echo "$ADGUARD_URL" | sed 's/arm64/arm/')
-        echo "🔧 已修正为: $ADGUARD_URL"
+    log_info "📡 正在获取 AdGuardHome 最新版本信息..."
+    
+    # 获取最新版本
+    local latest_version=$(curl -s "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    if [ -z "$latest_version" ]; then
+        log_error "无法获取AdGuardHome版本信息"
+        return 1
     fi
     
-    VERSION=$(echo "$ADGUARD_URL" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -n1)
-    echo "📦 版本: ${VERSION:-未知}"
-    echo "✅ 获取下载链接: $ADGUARD_URL"
+    log_info "📦 版本: $latest_version"
     
-    echo "⬇️  正在下载 AdGuardHome..."
-    if wget $WGET_OPTS -O "$TMP_DIR/AdGuardHome.tar.gz" "$ADGUARD_URL"; then
-        if file "$TMP_DIR/AdGuardHome.tar.gz" | grep -q gzip; then
-            echo "📂 正在解压..."
-            if tar -zxf "$TMP_DIR/AdGuardHome.tar.gz" -C "$TMP_DIR"; then
-                # 查找 AdGuardHome 可执行文件
-                ADG_EXEC=$(find "$TMP_DIR" -type f -name "AdGuardHome" | head -n1)
-                
-                if [ -n "$ADG_EXEC" ]; then
-                    cp "$ADG_EXEC" "$ADGUARD_DIR/AdGuardHome"
-                    chmod +x "$ADGUARD_DIR/AdGuardHome"
-                    echo "✅ AdGuardHome 安装成功: $ADGUARD_DIR/AdGuardHome"
-                else
-                    echo "❌ 未找到 AdGuardHome 可执行文件"
-                fi
-            else
-                echo "❌ AdGuardHome 解压失败"
-            fi
-        else
-            echo "❌ AdGuardHome 下载文件格式错误"
-        fi
+    # 检测架构
+    local arch=$(detect_arch)
+    log_info "🔍 检测到架构: $arch"
+    
+    # 构建下载链接
+    local download_url="https://github.com/AdguardTeam/AdGuardHome/releases/download/$latest_version/AdGuardHome_$arch.tar.gz"
+    log_info "✅ 获取下载链接: $download_url"
+    
+    # 下载AdGuardHome
+    log_info "⬇️ 正在下载 AdGuardHome..."
+    
+    # 创建临时目录
+    mkdir -p /tmp/adguardhome
+    cd /tmp/adguardhome
+    
+    # 尝试多个下载方式
+    local download_success=false
+    
+    # 方式1: 直接下载
+    if wget -q --timeout=30 --tries=3 -O AdGuardHome.tar.gz "$download_url"; then
+        download_success=true
+    # 方式2: 使用GitHub镜像
+    elif wget -q --timeout=30 --tries=3 -O AdGuardHome.tar.gz "${download_url/github.com/mirror.ghproxy.com/github.com}"; then
+        download_success=true
+    # 方式3: 使用另一个镜像
+    elif wget -q --timeout=30 --tries=3 -O AdGuardHome.tar.gz "${download_url/github.com/ghproxy.com/github.com}"; then
+        download_success=true
+    fi
+    
+    if [ "$download_success" = true ]; then
+        # 解压并安装
+        tar -xzf AdGuardHome.tar.gz
+        
+        # 创建目标目录
+        mkdir -p "$GITHUB_WORKSPACE/openwrt/files/usr/bin"
+        
+        # 复制二进制文件
+        cp AdGuardHome/AdGuardHome "$GITHUB_WORKSPACE/openwrt/files/usr/bin/"
+        chmod +x "$GITHUB_WORKSPACE/openwrt/files/usr/bin/AdGuardHome"
+        
+        cd - > /dev/null
+        rm -rf /tmp/adguardhome
+        
+        log_success "✅ AdGuardHome 安装成功"
     else
-        echo "❌ AdGuardHome 下载失败"
+        cd - > /dev/null
+        rm -rf /tmp/adguardhome
+        log_error "❌ AdGuardHome 下载失败"
+        return 1
     fi
-else
-    echo "❌ 未找到适用于 $AGH_ARCH 的 AdGuardHome 下载链接"
-fi
+}
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
