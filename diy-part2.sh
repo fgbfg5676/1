@@ -107,73 +107,82 @@ else
 fi
 
 # -------------------- AdGuardHome 核心集成 --------------------
-# 集成AdGuardHome
-integrate_adguardhome() {
-    log_info "🚀 开始集成 AdGuardHome 核心..."
+echo "🚀 开始集成 AdGuardHome..."
+
+# 获取最新版本
+echo "📡 正在获取 AdGuardHome 最新版本信息..."
+AGH_VERSION=$(curl -s "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+if [ -z "$AGH_VERSION" ]; then
+    echo "❌ 无法获取AdGuardHome版本信息，使用备用版本"
+    AGH_VERSION="v0.107.52"
+fi
+
+echo "📦 版本: $AGH_VERSION"
+
+# 构建下载链接
+AGH_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/$AGH_VERSION/AdGuardHome_linux_${ARCH}.tar.gz"
+
+# 下载AdGuardHome
+echo "⬇️ 正在下载 AdGuardHome..."
+AGH_SUCCESS=false
+
+# 尝试多个镜像下载
+for mirror in \
+    "$AGH_URL" \
+    "${AGH_URL/github.com/mirror.ghproxy.com/github.com}" \
+    "${AGH_URL/github.com/ghproxy.com/github.com}"; do
     
-    log_info "📡 正在获取 AdGuardHome 最新版本信息..."
-    
-    # 获取最新版本
-    local latest_version=$(curl -s "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    
-    if [ -z "$latest_version" ]; then
-        log_error "无法获取AdGuardHome版本信息"
-        return 1
+    echo "尝试: $mirror"
+    if wget $WGET_OPTS -O "$TMP_DIR/AdGuardHome.tar.gz" "$mirror"; then
+        if file "$TMP_DIR/AdGuardHome.tar.gz" | grep -q "gzip compressed"; then
+            AGH_SUCCESS=true
+            break
+        fi
     fi
+done
+
+if [ "$AGH_SUCCESS" = true ]; then
+    echo "📂 正在解压 AdGuardHome..."
+    cd "$TMP_DIR"
+    tar -xzf AdGuardHome.tar.gz
     
-    log_info "📦 版本: $latest_version"
-    
-    # 检测架构
-    local arch=$(detect_arch)
-    log_info "🔍 检测到架构: $arch"
-    
-    # 构建下载链接
-    local download_url="https://github.com/AdguardTeam/AdGuardHome/releases/download/$latest_version/AdGuardHome_$arch.tar.gz"
-    log_info "✅ 获取下载链接: $download_url"
-    
-    # 下载AdGuardHome
-    log_info "⬇️ 正在下载 AdGuardHome..."
-    
-    # 创建临时目录
-    mkdir -p /tmp/adguardhome
-    cd /tmp/adguardhome
-    
-    # 尝试多个下载方式
-    local download_success=false
-    
-    # 方式1: 直接下载
-    if wget -q --timeout=30 --tries=3 -O AdGuardHome.tar.gz "$download_url"; then
-        download_success=true
-    # 方式2: 使用GitHub镜像
-    elif wget -q --timeout=30 --tries=3 -O AdGuardHome.tar.gz "${download_url/github.com/mirror.ghproxy.com/github.com}"; then
-        download_success=true
-    # 方式3: 使用另一个镜像
-    elif wget -q --timeout=30 --tries=3 -O AdGuardHome.tar.gz "${download_url/github.com/ghproxy.com/github.com}"; then
-        download_success=true
-    fi
-    
-    if [ "$download_success" = true ]; then
-        # 解压并安装
-        tar -xzf AdGuardHome.tar.gz
+    if [ -f "AdGuardHome/AdGuardHome" ]; then
+        # 安装二进制文件
+        cp "AdGuardHome/AdGuardHome" "../$ADGUARD_DIR/"
+        chmod +x "../$ADGUARD_DIR/AdGuardHome"
         
-        # 创建目标目录
-        mkdir -p "$GITHUB_WORKSPACE/openwrt/files/usr/bin"
+        # 创建配置目录
+        mkdir -p "files/etc/AdGuardHome"
         
-        # 复制二进制文件
-        cp AdGuardHome/AdGuardHome "$GITHUB_WORKSPACE/openwrt/files/usr/bin/"
-        chmod +x "$GITHUB_WORKSPACE/openwrt/files/usr/bin/AdGuardHome"
-        
-        cd - > /dev/null
-        rm -rf /tmp/adguardhome
-        
-        log_success "✅ AdGuardHome 安装成功"
-    else
-        cd - > /dev/null
-        rm -rf /tmp/adguardhome
-        log_error "❌ AdGuardHome 下载失败"
-        return 1
-    fi
+        # 创建启动脚本
+        mkdir -p "files/etc/init.d"
+        cat > "files/etc/init.d/adguardhome" << 'EOF'
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+PROG=/usr/bin/AdGuardHome
+CONFDIR=/etc/AdGuardHome
+
+start_service() {
+    mkdir -p $CONFDIR
+    procd_open_instance adguardhome
+    procd_set_param command $PROG -c $CONFDIR -w $CONFDIR
+    procd_set_param respawn
+    procd_close_instance
 }
+EOF
+        chmod +x "files/etc/init.d/adguardhome"
+        
+        echo "✅ AdGuardHome 安装成功"
+    else
+        echo "❌ 解压后未找到 AdGuardHome 可执行文件"
+    fi
+else
+    echo "❌ AdGuardHome 下载失败"
+fi
+
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
