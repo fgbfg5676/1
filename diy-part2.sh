@@ -146,10 +146,11 @@ if [ "$AGH_SUCCESS" = true ]; then
     echo "📂 正在解压 AdGuardHome..."
     cd "$TMP_DIR"
     tar -xzf AdGuardHome.tar.gz
+    cd - > /dev/null  # 返回到 openwrt 目录
     
-    if [ -f "AdGuardHome/AdGuardHome" ]; then
-        # 安装二进制文件 (使用绝对路径)
-        cp "AdGuardHome/AdGuardHome" "$ADGUARD_DIR/"
+    if [ -f "$TMP_DIR/AdGuardHome/AdGuardHome" ]; then
+        # 安装二进制文件
+        cp "$TMP_DIR/AdGuardHome/AdGuardHome" "$ADGUARD_DIR/"
         chmod +x "$ADGUARD_DIR/AdGuardHome"
         
         # 创建配置目录
@@ -182,7 +183,6 @@ EOF
 else
     echo "❌ AdGuardHome 下载失败"
 fi
-
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
