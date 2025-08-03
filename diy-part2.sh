@@ -66,6 +66,22 @@ git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git package/cus
 echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
+# -------------------- 集成 AdGuardHome --------------------
+echo "📦 集成 AdGuardHome 二进制..."
+
+mkdir -p files/usr/bin
+
+AGH_VERSION="v0.107.64"
+AGH_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/${AGH_VERSION}/AdGuardHome_linux_arm.tar.gz"
+
+curl -L "$AGH_URL" -o /tmp/AdGuardHome_linux_arm.tar.gz
+tar -xzf /tmp/AdGuardHome_linux_arm.tar.gz -C /tmp
+mv /tmp/AdGuardHome/AdGuardHome files/usr/bin/AdGuardHome
+chmod +x files/usr/bin/AdGuardHome
+rm -rf /tmp/AdGuardHome /tmp/AdGuardHome_linux_arm.tar.gz
+
+echo "✅ AdGuardHome 已集成"
+
 # -------------------- 修改默认配置 --------------------
 echo "🔧 修改默认配置..."
 
