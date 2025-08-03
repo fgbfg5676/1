@@ -109,8 +109,8 @@ fi
 # -------------------- AdGuardHome 核心集成 --------------------
 echo "🚀 开始集成 AdGuardHome 核心..."
 
-# 设置架构
-AGH_ARCH="linux_arm"  # ARMv7 对应 linux_arm
+# 设置架构 - 确保匹配 ARMv7
+AGH_ARCH="linux_arm"  # ARMv7 对应 linux_arm，不是 arm64
 
 echo "📡 正在获取 AdGuardHome 最新版本信息..."
 
@@ -123,6 +123,16 @@ ADGUARD_URL=$(curl -s --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 
     sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
 
 if [ -n "$ADGUARD_URL" ]; then
+    echo "🔍 检查架构匹配: 期望 $AGH_ARCH, 实际下载 $(echo "$ADGUARD_URL" | grep -o 'linux_[^.]*')"
+    
+    # 验证下载的架构是否正确
+    if echo "$ADGUARD_URL" | grep -q "arm64" && [ "$AGH_ARCH" = "linux_arm" ]; then
+        echo "⚠️  警告：架构不匹配，ARMv7 设备下载了 ARM64 版本"
+        # 强制使用正确的架构
+        ADGUARD_URL=$(echo "$ADGUARD_URL" | sed 's/arm64/arm/')
+        echo "🔧 已修正为: $ADGUARD_URL"
+    fi
+    
     VERSION=$(echo "$ADGUARD_URL" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -n1)
     echo "📦 版本: ${VERSION:-未知}"
     echo "✅ 获取下载链接: $ADGUARD_URL"
@@ -154,7 +164,6 @@ if [ -n "$ADGUARD_URL" ]; then
 else
     echo "❌ 未找到适用于 $AGH_ARCH 的 AdGuardHome 下载链接"
 fi
-
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
