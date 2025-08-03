@@ -1,0 +1,24 @@
+# 停止之前可能的服务
+/usr/bin/AdGuardHome -s stop
+
+# 确保二进制位置正确
+mv /usr/bin/AdGuardHome /usr/bin/AdGuardHome.bak
+mkdir -p /usr/bin/AdGuardHome
+mv /usr/bin/AdGuardHome.bak /usr/bin/AdGuardHome/AdGuardHome
+chmod +x /usr/bin/AdGuardHome/AdGuardHome
+
+# 配置文件放 /etc/AdGuardHome.yaml，示例配置
+cat > /etc/AdGuardHome.yaml <<EOF
+bind_host: 0.0.0.0
+bind_port: 3000
+
+dns:
+  bind_host: 0.0.0.0
+  bind_port: 53
+EOF
+
+# 启动服务（在后台）
+/usr/bin/AdGuardHome/AdGuardHome -c /etc/AdGuardHome.yaml -w /etc/AdGuardHome/ -s start
+
+# 查看进程确认运行
+ps | grep AdGuardHome
