@@ -67,20 +67,42 @@ echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
 # -------------------- 集成 AdGuardHome --------------------
-echo "📦 集成 AdGuardHome 二进制..."
+AGH_VERSION="v0.107.64"
+TMP_DIR="/tmp"
+AGH_FILE="$TMP_DIR/AdGuardHome_linux_arm.tar.gz"
+AGH_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/${AGH_VERSION}/AdGuardHome_linux_arm.tar.gz"
+AGH_MIRROR="https://ghproxy.com/${AGH_URL}"
+
+download_file() {
+    local url="$1"
+    echo "尝试下载: $url"
+    curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -o "$AGH_FILE" "$url"
+    if file "$AGH_FILE" | grep -q "gzip compressed data"; then
+        echo "✅ 下载成功: $url"
+        return 0
+    else
+        echo "❌ 下载文件格式错误，非 gzip 压缩包"
+        return 1
+    fi
+}
 
 mkdir -p files/usr/bin
 
-AGH_VERSION="v0.107.64"
-AGH_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/${AGH_VERSION}/AdGuardHome_linux_arm.tar.gz"
+if download_file "$AGH_URL"; then
+    echo "使用官方源文件"
+elif download_file "$AGH_MIRROR"; then
+    echo "使用镜像源文件"
+else
+    echo "❌ 两个下载源均失败，请检查网络"
+    exit 1
+fi
 
-curl -L "$AGH_URL" -o /tmp/AdGuardHome_linux_arm.tar.gz
-tar -xzf /tmp/AdGuardHome_linux_arm.tar.gz -C /tmp
-mv /tmp/AdGuardHome/AdGuardHome files/usr/bin/AdGuardHome
+tar -xzf "$AGH_FILE" -C "$TMP_DIR"
+mv "$TMP_DIR/AdGuardHome/AdGuardHome" files/usr/bin/AdGuardHome
 chmod +x files/usr/bin/AdGuardHome
-rm -rf /tmp/AdGuardHome /tmp/AdGuardHome_linux_arm.tar.gz
+rm -rf "$AGH_FILE" "$TMP_DIR/AdGuardHome"
 
-echo "✅ AdGuardHome 已集成"
+echo "✅ AdGuardHome 二进制集成完成"
 
 # -------------------- 修改默认配置 --------------------
 echo "🔧 修改默认配置..."
