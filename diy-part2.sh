@@ -22,6 +22,7 @@ echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
 
+
 # -------------------- DTS补丁处理 --------------------
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
 DTS_PATCH_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts.patch"
@@ -33,6 +34,7 @@ if [ ! -f "$TARGET_DTS" ]; then
     echo "Applying DTS patch..."
     patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE"
 fi
+
 
 # -------------------- 设备规则配置 --------------------
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
@@ -52,6 +54,7 @@ TARGET_DEVICES += mobipromo_cm520-79f
 EOF
 fi
 
+
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
@@ -66,24 +69,79 @@ git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git package/cus
 echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
+
 # -------------------- 集成 AdGuardHome --------------------
-echo "📦 拷贝 AdGuardHome 二进制..."
+echo "📦 集成 AdGuardHome 组件..."
+
+# 创建所需目录
 mkdir -p files/usr/bin
+mkdir -p files/etc/AdGuardHome
+mkdir -p files/usr/lib/lua/luci/controller
+mkdir -p files/usr/lib/lua/luci/model/cbi
+mkdir -p files/usr/lib/lua/luci/view
+mkdir -p files/etc/config
+mkdir -p files/etc/init.d
+mkdir -p files/usr/lib/lua/luci/i18n
+mkdir -p tmp_adguard && cd tmp_adguard  # 临时工作目录
 
-# 下载 GitHub 仓库里的压缩包（用 raw 链接）
-curl -L https://github.com/fgbfg5676/1/raw/main/AdGuardHome_linux_armv7.tar.gz -o AdGuardHome_linux_armv7.tar.gz
-
-# 解压并移动
+# 1. 处理二进制文件（解压压缩包）
+echo "🔹 处理 AdGuardHome 二进制文件..."
+cp ../upload/main/AdGuardHome/adhome/depends/AdGuardHome_linux_armv7.tar.gz .
 tar -xzf AdGuardHome_linux_armv7.tar.gz
-mv AdGuardHome/AdGuardHome files/usr/bin/AdGuardHome
-chmod +x files/usr/bin/AdGuardHome
+mv AdGuardHome/AdGuardHome ../files/usr/bin/
+chmod +x ../files/usr/bin/AdGuardHome
 
-# 清理临时文件
-rm -rf AdGuardHome AdGuardHome_linux_armv7.tar.gz
+# 2. 处理 LuCI 界面（IPK包）
+echo "🔹 处理 LuCI 界面文件..."
+cp ../upload/main/AdGuardHome/adhome/luci-app-adguardhome_1.8-20221120_all.ipk .
+ar x luci-app-adguardhome_1.8-20221120_all.ipk
+tar -xzf data.tar.gz
+# 移动 LuCI 核心文件
+cp -r ./usr/lib/lua/luci/controller/adguardhome.lua ../files/usr/lib/lua/luci/controller/
+cp -r ./usr/lib/lua/luci/model/cbi/adguardhome ../files/usr/lib/lua/luci/model/cbi/
+cp -r ./usr/lib/lua/luci/view/adguardhome ../files/usr/lib/lua/luci/view/
+cp -r ./etc/config/adguardhome ../files/etc/config/
+cp -r ./etc/init.d/adguardhome ../files/etc/init.d/
+chmod +x ../files/etc/init.d/adguardhome  # 确保启动脚本可执行
+
+# 3. 处理中文语言包（IPK包）
+echo "🔹 处理中文语言包..."
+cp ../upload/main/AdGuardHome/adhome/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk .
+ar x luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk
+tar -xzf data.tar.gz
+cp ./usr/lib/lua/luci/i18n/adguardhome.zh-cn.lmo ../files/usr/lib/lua/luci/i18n/
+
+# 4. 处理默认配置文件
+echo "🔹 处理默认配置文件..."
+cp ../upload/main/AdGuardHome/adhome/AdGuardHome.yaml ../files/etc/AdGuardHome/
+
+# 返回上级目录并清理临时文件
+cd .. && rm -rf tmp_adguard
+
+# 5. 处理 AdGuardHome 依赖项
+echo "🔹 确保依赖项已启用..."
+REQUIRED_DEPS=(
+    "libmbedtls"       # 加密库依赖
+    "libpthread"       # 多线程支持
+    "libuci"           # UCI 配置支持
+    "libubus"          # UBUS 通信支持
+    "ipset"            # IP 规则支持
+)
+
+for dep in "${REQUIRED_DEPS[@]}"; do
+    if ! grep -q "CONFIG_PACKAGE_$dep=y" .config; then
+        echo "CONFIG_PACKAGE_$dep=y" >> .config
+        echo "Added missing dependency: $dep"
+    fi
+done
+
+# 6. 启用 AdGuardHome 相关配置
+echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config
 
 
 # -------------------- 修改默认配置 --------------------
-echo "🔧 修改默认配置..."
+echo "🔧 修改默认系统配置..."
 
 # 强制修改所有可能的配置文件
 CONFIG_FILES=(
@@ -117,7 +175,6 @@ exit 0
 UCIEOF
 
 chmod +x package/base-files/files/etc/uci-defaults/99-custom-network
-echo "✅ 已创建强制配置文件"
 
 # 批量查找并修改所有相关文件
 find . -name "*.sh" -o -name "config_generate" -o -name "02_network" -o -name "network" 2>/dev/null | \
@@ -131,9 +188,11 @@ while read -r file; do
     fi
 done
 
+
 echo "🎉 DIY脚本执行完成！"
 echo "📋 执行摘要："
 echo "   ✅ DTS 补丁已应用"
 echo "   ✅ 设备规则已添加"
-echo "   ✅ 插件已安装"
+echo "   ✅ 插件已安装（watchdog、partexp）"
+echo "   ✅ AdGuardHome 已完整集成（二进制+LuCI+中文语言包）"
 echo "   ✅ 默认配置已修改 (IP: 192.168.5.1, 主机名: CM520-79F)"
