@@ -71,6 +71,7 @@ echo "📦 集成 AdGuardHome 组件（使用本地文件或远程下载）..."
 
 ADHOME_BASE="upload/main/AdGuardHome/adhome"
 
+# 1. 创建目标目录（相对于脚本根目录）
 mkdir -p files/usr/bin
 mkdir -p files/etc/AdGuardHome
 mkdir -p files/usr/lib/lua/luci/controller
@@ -80,32 +81,54 @@ mkdir -p files/etc/config
 mkdir -p files/etc/init.d
 mkdir -p files/usr/lib/lua/luci/i18n
 
-# 1. 处理二进制文件
-echo "🔹 处理 AdGuardHome 二进制文件..."
-BIN_TAR="AdGuardHome_linux_armv7.tar.gz"
-BIN_PATH="$ADHOME_BASE/depends/$BIN_TAR"
-BIN_URL="https://github.com/fgbfg5676/1/raw/main/$BIN_PATH"
+# 2. 创建临时工作目录并进入
+mkdir -p tmp_adguard
+cd tmp_adguard
 
-if [ -f "../$BIN_PATH" ]; then
-    cp "../$BIN_PATH" .
+#########################
+# 处理二进制文件
+BIN_TAR="AdGuardHome_linux_armv7.tar.gz"
+BIN_PATH="../../$ADHOME_BASE/depends/$BIN_TAR"
+BIN_URL="https://github.com/fgbfg5676/1/raw/main/$ADHOME_BASE/depends/$BIN_TAR"
+
+echo "🔹 处理 AdGuardHome 二进制文件..."
+
+if [ -f "$BIN_PATH" ]; then
+    echo "找到本地二进制压缩包，开始复制..."
+    cp "$BIN_PATH" .
 else
     echo "本地二进制压缩包不存在，尝试远程下载..."
     curl -L -o "$BIN_TAR" "$BIN_URL" || { echo "二进制下载失败"; exit 1; }
 fi
 
+echo "解压二进制压缩包..."
 tar -xzf "$BIN_TAR"
+
+if [ ! -f "AdGuardHome/AdGuardHome" ]; then
+    echo "Error: 解压后找不到二进制文件 AdGuardHome/AdGuardHome"
+    exit 1
+fi
+
+# 确保目标目录存在（这里相对 tmp_adguard，回退一级是根目录）
+mkdir -p ../files/usr/bin
+
+echo "移动二进制文件到目标目录..."
 mv AdGuardHome/AdGuardHome ../files/usr/bin/
 chmod +x ../files/usr/bin/AdGuardHome
+
 rm -rf AdGuardHome "$BIN_TAR"
 
-# 2. 处理 LuCI 界面文件
-echo "🔹 处理 LuCI 界面文件..."
+#########################
+# 处理 LuCI 界面文件
 LUCI_IPK="luci-app-adguardhome_1.8-20221120_all.ipk"
-LUCI_IPK_PATH="$ADHOME_BASE/$LUCI_IPK"
-LUCI_IPK_URL="https://github.com/fgbfg5676/1/raw/main/$LUCI_IPK_PATH"
+LUCI_IPK_PATH="../../$ADHOME_BASE/$LUCI_IPK"
+LUCI_IPK_URL="https://github.com/fgbfg5676/1/raw/main/$ADHOME_BASE/$LUCI_IPK"
 
-if [ -f "../$LUCI_IPK_PATH" ]; then
-    cp "../$LUCI_IPK_PATH" .
+echo "🔹 处理 LuCI 界面文件..."
+
+if [ -f "$LUCI_IPK_PATH" ]; then
+    echo "找到本地 LuCI IPK，开始复制..."
+    cp "$LUCI_IPK_PATH" .
 else
     echo "本地 LuCI IPK 不存在，尝试远程下载..."
     curl -L -o "$LUCI_IPK" "$LUCI_IPK_URL" || { echo "LuCI IPK 下载失败"; exit 1; }
@@ -113,36 +136,53 @@ fi
 
 ar x "$LUCI_IPK"
 tar -xzf data.tar.gz
+
+# 确保 LuCI 目标目录存在
+mkdir -p ../files/usr/lib/lua/luci/controller
+mkdir -p ../files/usr/lib/lua/luci/model/cbi
+mkdir -p ../files/usr/lib/lua/luci/view
+mkdir -p ../files/etc/config
+mkdir -p ../files/etc/init.d
+
 cp usr/lib/lua/luci/controller/adguardhome.lua ../files/usr/lib/lua/luci/controller/
 cp -r usr/lib/lua/luci/model/cbi/adguardhome ../files/usr/lib/lua/luci/model/cbi/
 cp -r usr/lib/lua/luci/view/adguardhome ../files/usr/lib/lua/luci/view/
 cp etc/config/adguardhome ../files/etc/config/
 cp etc/init.d/adguardhome ../files/etc/init.d/
 chmod +x ../files/etc/init.d/adguardhome
+
 rm -rf usr etc data.tar.gz control.tar.gz debian-binary "$LUCI_IPK"
 
-# 3. 处理中文语言包
-echo "🔹 处理中文语言包..."
+#########################
+# 处理中文语言包
 I18N_IPK="luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk"
-I18N_IPK_PATH="$ADHOME_BASE/$I18N_IPK"
-I18N_IPK_URL="https://github.com/fgbfg5676/1/raw/main/$I18N_IPK_PATH"
+I18N_IPK_PATH="../../$ADHOME_BASE/$I18N_IPK"
+I18N_IPK_URL="https://github.com/fgbfg5676/1/raw/main/$ADHOME_BASE/$I18N_IPK"
 
-if [ -f "../$I18N_IPK_PATH" ]; then
-    cp "../$I18N_IPK_PATH" .
+echo "🔹 处理中文语言包..."
+
+if [ -f "$I18N_IPK_PATH" ]; then
+    echo "找到本地语言包 IPK，开始复制..."
+    cp "$I18N_IPK_PATH" .
 else
-    echo "本地中文语言包 IPK 不存在，尝试远程下载..."
+    echo "本地语言包 IPK 不存在，尝试远程下载..."
     curl -L -o "$I18N_IPK" "$I18N_IPK_URL" || { echo "语言包下载失败"; exit 1; }
 fi
 
 ar x "$I18N_IPK"
 tar -xzf data.tar.gz
+
+mkdir -p ../files/usr/lib/lua/luci/i18n
 cp usr/lib/lua/luci/i18n/adguardhome.zh-cn.lmo ../files/usr/lib/lua/luci/i18n/
+
 rm -rf usr data.tar.gz control.tar.gz debian-binary "$I18N_IPK"
 
-# 4. 处理默认配置文件
+#########################
+# 处理默认配置文件
 echo "🔹 处理默认配置文件..."
-if [ -f "../$ADHOME_BASE/AdGuardHome.yaml" ]; then
-    cp "../$ADHOME_BASE/AdGuardHome.yaml" ../files/etc/AdGuardHome/
+
+if [ -f "../../$ADHOME_BASE/AdGuardHome.yaml" ]; then
+    cp "../../$ADHOME_BASE/AdGuardHome.yaml" ../files/etc/AdGuardHome/
 else
     echo "Warning: 默认配置文件不存在，使用内置默认配置"
     cat > ../files/etc/AdGuardHome/AdGuardHome.yaml <<EOF
@@ -153,6 +193,11 @@ dns:
   bind_port: 53
 EOF
 fi
+
+#########################
+# 清理临时目录
+cd ..
+rm -rf tmp_adguard
 
 echo "✅ AdGuardHome 组件集成完成"
 
