@@ -67,13 +67,9 @@ echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
 # -------------------- 集成 AdGuardHome --------------------
-
-echo "📦 集成 AdGuardHome 组件（优先本地，缺则远程下载）..."
+echo "📦 集成 AdGuardHome 组件（使用本地文件或远程下载）..."
 
 ADHOME_BASE="upload/main/AdGuardHome/adhome"
-BIN_NAME="AdGuardHome_linux_armv7.tar.gz"
-BIN_PATH="$ADHOME_BASE/depends/$BIN_NAME"
-BIN_URL="https://github.com/fgbfg5676/1/raw/main/upload/main/AdGuardHome/adhome/depends/$BIN_NAME?raw=true"
 
 mkdir -p files/usr/bin
 mkdir -p files/etc/AdGuardHome
@@ -84,46 +80,38 @@ mkdir -p files/etc/config
 mkdir -p files/etc/init.d
 mkdir -p files/usr/lib/lua/luci/i18n
 
-mkdir -p tmp_adguard && cd tmp_adguard
-
+# 1. 处理二进制文件
 echo "🔹 处理 AdGuardHome 二进制文件..."
+BIN_TAR="AdGuardHome_linux_armv7.tar.gz"
+BIN_PATH="$ADHOME_BASE/depends/$BIN_TAR"
+BIN_URL="https://github.com/fgbfg5676/1/raw/main/$BIN_PATH"
 
 if [ -f "../$BIN_PATH" ]; then
-    echo "使用本地二进制包：$BIN_PATH"
     cp "../$BIN_PATH" .
 else
-    echo "本地二进制包不存在，尝试远程下载..."
-    wget -q --show-progress -O "$BIN_NAME" "$BIN_URL" || {
-        echo "Error: 无法下载二进制包 $BIN_URL"
-        exit 1
-    }
+    echo "本地二进制压缩包不存在，尝试远程下载..."
+    curl -L -o "$BIN_TAR" "$BIN_URL" || { echo "二进制下载失败"; exit 1; }
 fi
 
-tar -xzf "$BIN_NAME"
+tar -xzf "$BIN_TAR"
 mv AdGuardHome/AdGuardHome ../files/usr/bin/
 chmod +x ../files/usr/bin/AdGuardHome
+rm -rf AdGuardHome "$BIN_TAR"
 
-# LuCI 界面和语言包处理（同样支持本地优先）
-LUA_IPK="luci-app-adguardhome_1.8-20221120_all.ipk"
-LUA_IPK_PATH="$ADHOME_BASE/$LUA_IPK"
-LUA_IPK_URL="https://github.com/fgbfg5676/1/raw/main/upload/main/AdGuardHome/adhome/$LUA_IPK?raw=true"
-
-I18N_IPK="luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk"
-I18N_IPK_PATH="$ADHOME_BASE/$I18N_IPK"
-I18N_IPK_URL="https://github.com/fgbfg5676/1/raw/main/upload/main/AdGuardHome/adhome/$I18N_IPK?raw=true"
-
+# 2. 处理 LuCI 界面文件
 echo "🔹 处理 LuCI 界面文件..."
-if [ -f "../$LUA_IPK_PATH" ]; then
-    cp "../$LUA_IPK_PATH" .
+LUCI_IPK="luci-app-adguardhome_1.8-20221120_all.ipk"
+LUCI_IPK_PATH="$ADHOME_BASE/$LUCI_IPK"
+LUCI_IPK_URL="https://github.com/fgbfg5676/1/raw/main/$LUCI_IPK_PATH"
+
+if [ -f "../$LUCI_IPK_PATH" ]; then
+    cp "../$LUCI_IPK_PATH" .
 else
     echo "本地 LuCI IPK 不存在，尝试远程下载..."
-    wget -q --show-progress -O "$LUA_IPK" "$LUA_IPK_URL" || {
-        echo "Error: 无法下载 LuCI IPK $LUA_IPK_URL"
-        exit 1
-    }
+    curl -L -o "$LUCI_IPK" "$LUCI_IPK_URL" || { echo "LuCI IPK 下载失败"; exit 1; }
 fi
 
-ar x "$LUA_IPK"
+ar x "$LUCI_IPK"
 tar -xzf data.tar.gz
 cp usr/lib/lua/luci/controller/adguardhome.lua ../files/usr/lib/lua/luci/controller/
 cp -r usr/lib/lua/luci/model/cbi/adguardhome ../files/usr/lib/lua/luci/model/cbi/
@@ -131,135 +119,42 @@ cp -r usr/lib/lua/luci/view/adguardhome ../files/usr/lib/lua/luci/view/
 cp etc/config/adguardhome ../files/etc/config/
 cp etc/init.d/adguardhome ../files/etc/init.d/
 chmod +x ../files/etc/init.d/adguardhome
+rm -rf usr etc data.tar.gz control.tar.gz debian-binary "$LUCI_IPK"
 
+# 3. 处理中文语言包
 echo "🔹 处理中文语言包..."
+I18N_IPK="luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk"
+I18N_IPK_PATH="$ADHOME_BASE/$I18N_IPK"
+I18N_IPK_URL="https://github.com/fgbfg5676/1/raw/main/$I18N_IPK_PATH"
+
 if [ -f "../$I18N_IPK_PATH" ]; then
     cp "../$I18N_IPK_PATH" .
 else
     echo "本地中文语言包 IPK 不存在，尝试远程下载..."
-    wget -q --show-progress -O "$I18N_IPK" "$I18N_IPK_URL" || {
-        echo "Error: 无法下载中文语言包 IPK $I18N_IPK_URL"
-        exit 1
-    }
+    curl -L -o "$I18N_IPK" "$I18N_IPK_URL" || { echo "语言包下载失败"; exit 1; }
 fi
 
 ar x "$I18N_IPK"
 tar -xzf data.tar.gz
 cp usr/lib/lua/luci/i18n/adguardhome.zh-cn.lmo ../files/usr/lib/lua/luci/i18n/
+rm -rf usr data.tar.gz control.tar.gz debian-binary "$I18N_IPK"
 
+# 4. 处理默认配置文件
 echo "🔹 处理默认配置文件..."
 if [ -f "../$ADHOME_BASE/AdGuardHome.yaml" ]; then
     cp "../$ADHOME_BASE/AdGuardHome.yaml" ../files/etc/AdGuardHome/
 else
     echo "Warning: 默认配置文件不存在，使用内置默认配置"
-    cat > ../files/etc/AdGuardHome/AdGuardHome.yaml <<'EOF'
+    cat > ../files/etc/AdGuardHome/AdGuardHome.yaml <<EOF
 bind_host: 0.0.0.0
 bind_port: 3000
-users:
-- name: root
-  password: $2y$10$FfeQavihMUiXCuJhHuQwy.6EOXDvkXb/S50qI5fXizqarNT/ShhQm
-language: ""
-rlimit_nofile: 0
 dns:
   bind_host: 0.0.0.0
-  port: 53
-  statistics_interval: 1
-  protection_enabled: true
-  filtering_enabled: true
-  filters_update_interval: 24
-  blocking_mode: nxdomain
-  blocked_response_ttl: 10
-  querylog_enabled: false
-  querylog_interval: 1
-  ratelimit: 0
-  ratelimit_whitelist: []
-  refuse_any: false
-  bootstrap_dns: []
-  all_servers: false
-  allowed_clients: []
-  disallowed_clients: []
-  blocked_hosts: []
-  parental_block_host: ""
-  safebrowsing_block_host: ""
-  blocked_services: []
-  cache_size: 4194304
-  parental_sensitivity: 13
-  parental_enabled: false
-  safesearch_enabled: false
-  safebrowsing_enabled: false
-  safebrowsing_cache_size: 1048576
-  safesearch_cache_size: 1048576
-  parental_cache_size: 1048576
-  cache_time: 30
-  rewrites: []
-  upstream_dns: []
-tls:
-  enabled: false
-  server_name: ""
-  force_https: false
-  port_https: 443
-  port_dns_over_tls: 853
-  certificate_chain: ""
-  private_key: ""
-  certificate_path: ""
-  private_key_path: ""
-filters:
-- enabled: true
-  url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
-  name: AdGuard Simplified Domain Names filter
-  id: 1
-- enabled: true
-  url: https://adaway.org/hosts.txt
-  name: AdAway
-  id: 2
-- enabled: true
-  url: https://www.malwaredomainlist.com/hostslist/hosts.txt
-  name: MalwareDomainList.com Hosts List
-  id: 4
-- enabled: true
-  url: https://hosts.nfz.moe/full/hosts
-  name: neoHosts full
-  id: 1575618240
-user_rules: []
-dhcp:
-  enabled: false
-  interface_name: ""
-  gateway_ip: ""
-  subnet_mask: ""
-  range_start: ""
-  range_end: ""
-  lease_duration: 86400
-  icmp_timeout_msec: 1000
-clients: []
-log_file: ""
-verbose: false
-schema_version: 5
+  bind_port: 53
 EOF
 fi
 
-cd .. && rm -rf tmp_adguard
-
-echo "🔹 检查并启用必要依赖..."
-REQUIRED_DEPS=(
-    "libmbedtls"
-    "libpthread"
-    "libuci"
-    "ipset"
-)
-
-for dep in "${REQUIRED_DEPS[@]}"; do
-    if ! grep -q "CONFIG_PACKAGE_$dep=y" .config; then
-        echo "CONFIG_PACKAGE_$dep=y" >> .config
-        echo "已添加缺失依赖: $dep"
-    fi
-done
-
-echo "🔹 启用 AdGuardHome 相关配置..."
-grep -qxF "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
-grep -qxF "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" .config || echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config
-
 echo "✅ AdGuardHome 组件集成完成"
-
 
 # -------------------- 修改默认配置 --------------------
 echo "🔧 修改默认配置..."
