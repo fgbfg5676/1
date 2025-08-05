@@ -12,7 +12,7 @@ WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
-GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+GENERIC_MK="target/linux/linux/ipq40xx/image/generic.mk"
 
 mkdir -p "$DTS_DIR"
 
@@ -84,16 +84,17 @@ mkdir -p files/etc/init.d
 mkdir -p files/usr/lib/lua/luci/i18n
 mkdir -p tmp_adguard && cd tmp_adguard  # 临时工作目录
 
-# 1. 处理二进制文件（解压压缩包）
+# 1. 处理二进制文件（修正路径：根据实际文件夹结构，依赖包在 adhome/depends 下）
 echo "🔹 处理 AdGuardHome 二进制文件..."
-cp ../upload/main/AdGuardHome/adhome/depends/AdGuardHome_linux_armv7.tar.gz .
+# 修正路径为当前代码库中的实际位置
+cp ../../upload/main/AdGuardHome/adhome/depends/AdGuardHome_linux_armv7.tar.gz .
 tar -xzf AdGuardHome_linux_armv7.tar.gz
 mv AdGuardHome/AdGuardHome ../files/usr/bin/
 chmod +x ../files/usr/bin/AdGuardHome
 
-# 2. 处理 LuCI 界面（IPK包）
+# 2. 处理 LuCI 界面（IPK包，修正路径）
 echo "🔹 处理 LuCI 界面文件..."
-cp ../upload/main/AdGuardHome/adhome/luci-app-adguardhome_1.8-20221120_all.ipk .
+cp ../../upload/main/AdGuardHome/adhome/luci-app-adguardhome_1.8-20221120_all.ipk .
 ar x luci-app-adguardhome_1.8-20221120_all.ipk
 tar -xzf data.tar.gz
 # 移动 LuCI 核心文件
@@ -104,16 +105,17 @@ cp -r ./etc/config/adguardhome ../files/etc/config/
 cp -r ./etc/init.d/adguardhome ../files/etc/init.d/
 chmod +x ../files/etc/init.d/adguardhome  # 确保启动脚本可执行
 
-# 3. 处理中文语言包（IPK包）
+# 3. 处理中文语言包（IPK包，修正路径）
 echo "🔹 处理中文语言包..."
-cp ../upload/main/AdGuardHome/adhome/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk .
+cp ../../upload/main/AdGuardHome/adhome/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk .
 ar x luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk
 tar -xzf data.tar.gz
 cp ./usr/lib/lua/luci/i18n/adguardhome.zh-cn.lmo ../files/usr/lib/lua/luci/i18n/
 
-# 4. 处理默认配置文件
+# 4. 处理默认配置文件（如果有需要，可从 adhome 目录添加）
 echo "🔹 处理默认配置文件..."
-cp ../upload/main/AdGuardHome/adhome/AdGuardHome.yaml ../files/etc/AdGuardHome/
+# 若存在默认配置文件，添加以下行（根据实际情况调整）
+# cp ../../upload/main/AdGuardHome/adhome/AdGuardHome.yaml ../files/etc/AdGuardHome/
 
 # 返回上级目录并清理临时文件
 cd .. && rm -rf tmp_adguard
