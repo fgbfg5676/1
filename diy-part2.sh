@@ -119,19 +119,18 @@ chmod +x ../files/usr/bin/AdGuardHome
 rm -rf AdGuardHome "$BIN_TAR"
 
 #########################
-# 处理 LuCI 界面文件
+# LuCI IPK 下载与检测
 LUCI_IPK="luci-app-adguardhome_1.8-20221120_all.ipk"
-LUCI_IPK_PATH="../../$ADHOME_BASE/$LUCI_IPK"
-LUCI_IPK_URL="https://github.com/fgbfg5676/1/raw/main/$ADHOME_BASE/$LUCI_IPK"
-
-echo "🔹 处理 LuCI 界面文件..."
+LUCI_IPK_URL="https://raw.githubusercontent.com/fgbfg5676/1/main/upload/main/AdGuardHome/adhome/$LUCI_IPK"
 
 if [ -f "$LUCI_IPK_PATH" ]; then
-    echo "找到本地 LuCI IPK，开始复制..."
     cp "$LUCI_IPK_PATH" .
 else
-    echo "本地 LuCI IPK 不存在，尝试远程下载..."
-    curl -L -o "$LUCI_IPK" "$LUCI_IPK_URL" || { echo "LuCI IPK 下载失败"; exit 1; }
+    curl -L -o "$LUCI_IPK" "$LUCI_IPK_URL"
+    if head -n 1 "$LUCI_IPK" | grep -q -i "<!DOCTYPE html>"; then
+        echo "Error: 下载的不是 IPK 文件"
+        exit 1
+    fi
 fi
 
 ar x "$LUCI_IPK"
