@@ -67,59 +67,57 @@ echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
 # -------------------- 集成 AdGuardHome --------------------
+
 echo "📦 集成 AdGuardHome 组件（使用本地文件）..."
 
-# 定义仓库中 AdGuardHome 相关文件的路径（根据你的 folder tree 调整）
-ADHOME_BASE="upload/main/AdGuardHome/adhome"  # 相对于脚本执行目录的路径
+ADHOME_BASE="upload/main/AdGuardHome/adhome"
 
-# 创建所需目录（确保目标路径结构正确）
-mkdir -p files/usr/bin                  # 存放二进制文件
-mkdir -p files/etc/AdGuardHome          # 存放配置文件
-mkdir -p files/usr/lib/lua/luci/controller  # LuCI 控制器
-mkdir -p files/usr/lib/lua/luci/model/cbi    # LuCI 配置界面
-mkdir -p files/usr/lib/lua/luci/view         # LuCI 视图
-mkdir -p files/etc/config               # 配置文件
-mkdir -p files/etc/init.d               # 启动脚本
-mkdir -p files/usr/lib/lua/luci/i18n    # 语言包
+# 创建目录结构
+mkdir -p files/usr/bin
+mkdir -p files/etc/AdGuardHome
+mkdir -p files/usr/lib/lua/luci/controller
+mkdir -p files/usr/lib/lua/luci/model/cbi
+mkdir -p files/usr/lib/lua/luci/view
+mkdir -p files/etc/config
+mkdir -p files/etc/init.d
+mkdir -p files/usr/lib/lua/luci/i18n
 
-# 创建临时工作目录并进入
+# 进入临时目录
 mkdir -p tmp_adguard && cd tmp_adguard
 
-# 1. 处理二进制文件（从本地压缩包提取）
+# 1. 复制并解压二进制文件
 echo "🔹 处理 AdGuardHome 二进制文件..."
-if [ -f "../$ADHOME_BASE/depends/AdGuardHome_linux_armv7.tar.gz" ]; then
-    cp "../$ADHOME_BASE/depends/AdGuardHome_linux_armv7.tar.gz" .
+if [ -f "$ADHOME_BASE/depends/AdGuardHome_linux_armv7.tar.gz" ]; then
+    cp "$ADHOME_BASE/depends/AdGuardHome_linux_armv7.tar.gz" .
     tar -xzf AdGuardHome_linux_armv7.tar.gz
-    mv AdGuardHome/AdGuardHome ../files/usr/bin/  # 移动二进制到目标路径
-    chmod +x ../files/usr/bin/AdGuardHome         # 赋予执行权限
+    mv AdGuardHome/AdGuardHome ../files/usr/bin/
+    chmod +x ../files/usr/bin/AdGuardHome
 else
     echo "Error: 二进制压缩包不存在，请检查路径: $ADHOME_BASE/depends/"
     exit 1
 fi
 
-# 2. 处理 LuCI 界面（从本地 IPK 包提取）
+# 2. 处理 LuCI 界面
 echo "🔹 处理 LuCI 界面文件..."
-if [ -f "../$ADHOME_BASE/luci-app-adguardhome_1.8-20221120_all.ipk" ]; then
-    cp "../$ADHOME_BASE/luci-app-adguardhome_1.8-20221120_all.ipk" .
-    ar x luci-app-adguardhome_1.8-20221120_all.ipk  # 解压 IPK 包
-    tar -xzf data.tar.gz                            # 提取数据文件
-    
-    # 移动 LuCI 核心组件到目标路径
+if [ -f "$ADHOME_BASE/luci-app-adguardhome_1.8-20221120_all.ipk" ]; then
+    cp "$ADHOME_BASE/luci-app-adguardhome_1.8-20221120_all.ipk" .
+    ar x luci-app-adguardhome_1.8-20221120_all.ipk
+    tar -xzf data.tar.gz
     cp usr/lib/lua/luci/controller/adguardhome.lua ../files/usr/lib/lua/luci/controller/
     cp -r usr/lib/lua/luci/model/cbi/adguardhome ../files/usr/lib/lua/luci/model/cbi/
     cp -r usr/lib/lua/luci/view/adguardhome ../files/usr/lib/lua/luci/view/
     cp etc/config/adguardhome ../files/etc/config/
     cp etc/init.d/adguardhome ../files/etc/init.d/
-    chmod +x ../files/etc/init.d/adguardhome  # 确保启动脚本可执行
+    chmod +x ../files/etc/init.d/adguardhome
 else
     echo "Error: LuCI 界面 IPK 不存在，请检查路径: $ADHOME_BASE/"
     exit 1
 fi
 
-# 3. 处理中文语言包（从本地 IPK 包提取）
+# 3. 处理中文语言包
 echo "🔹 处理中文语言包..."
-if [ -f "../$ADHOME_BASE/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk" ]; then
-    cp "../$ADHOME_BASE/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk" .
+if [ -f "$ADHOME_BASE/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk" ]; then
+    cp "$ADHOME_BASE/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk" .
     ar x luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk
     tar -xzf data.tar.gz
     cp usr/lib/lua/luci/i18n/adguardhome.zh-cn.lmo ../files/usr/lib/lua/luci/i18n/
@@ -130,30 +128,105 @@ fi
 
 # 4. 处理默认配置文件
 echo "🔹 处理默认配置文件..."
-if [ -f "../$ADHOME_BASE/AdGuardHome.yaml" ]; then
-    cp "../$ADHOME_BASE/AdGuardHome.yaml" ../files/etc/AdGuardHome/
+if [ -f "$ADHOME_BASE/AdGuardHome.yaml" ]; then
+    cp "$ADHOME_BASE/AdGuardHome.yaml" ../files/etc/AdGuardHome/
 else
     echo "Warning: 默认配置文件不存在，使用内置默认配置"
-    # 若本地无配置文件，生成一个基础配置
-    cat > ../files/etc/AdGuardHome/AdGuardHome.yaml <<EOF
+    cat > ../files/etc/AdGuardHome/AdGuardHome.yaml <<'EOF'
 bind_host: 0.0.0.0
 bind_port: 3000
+users:
+- name: root
+  password: $2y$10$FfeQavihMUiXCuJhHuQwy.6EOXDvkXb/S50qI5fXizqarNT/ShhQm
+language: ""
+rlimit_nofile: 0
 dns:
   bind_host: 0.0.0.0
-  bind_port: 53
+  port: 53
+  statistics_interval: 1
+  protection_enabled: true
+  filtering_enabled: true
+  filters_update_interval: 24
+  blocking_mode: nxdomain
+  blocked_response_ttl: 10
+  querylog_enabled: false
+  querylog_interval: 1
+  ratelimit: 0
+  ratelimit_whitelist: []
+  refuse_any: false
+  bootstrap_dns: []
+  all_servers: false
+  allowed_clients: []
+  disallowed_clients: []
+  blocked_hosts: []
+  parental_block_host: ""
+  safebrowsing_block_host: ""
+  blocked_services: []
+  cache_size: 4194304
+  parental_sensitivity: 13
+  parental_enabled: false
+  safesearch_enabled: false
+  safebrowsing_enabled: false
+  safebrowsing_cache_size: 1048576
+  safesearch_cache_size: 1048576
+  parental_cache_size: 1048576
+  cache_time: 30
+  rewrites: []
+  upstream_dns: []
+tls:
+  enabled: false
+  server_name: ""
+  force_https: false
+  port_https: 443
+  port_dns_over_tls: 853
+  certificate_chain: ""
+  private_key: ""
+  certificate_path: ""
+  private_key_path: ""
+filters:
+- enabled: true
+  url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+  name: AdGuard Simplified Domain Names filter
+  id: 1
+- enabled: true
+  url: https://adaway.org/hosts.txt
+  name: AdAway
+  id: 2
+- enabled: true
+  url: https://www.malwaredomainlist.com/hostslist/hosts.txt
+  name: MalwareDomainList.com Hosts List
+  id: 4
+- enabled: true
+  url: https://hosts.nfz.moe/full/hosts
+  name: neoHosts full
+  id: 1575618240
+user_rules: []
+dhcp:
+  enabled: false
+  interface_name: ""
+  gateway_ip: ""
+  subnet_mask: ""
+  range_start: ""
+  range_end: ""
+  lease_duration: 86400
+  icmp_timeout_msec: 1000
+clients: []
+log_file: ""
+verbose: false
+schema_version: 5
 EOF
 fi
 
-# 清理临时文件并返回上级目录
+# 清理临时目录
 cd .. && rm -rf tmp_adguard
 
-# 5. 确保依赖项已启用（仅添加必要依赖）
+# 5. 启用依赖
 echo "🔹 检查并启用必要依赖..."
 REQUIRED_DEPS=(
-    "libmbedtls"  # 加密相关依赖
-    "libpthread"  # 多线程支持
-    "libuci"      # OpenWrt 配置系统支持
-    "ipset"       # IP 规则管理（AdGuardHome 过滤需要）
+    "libmbedtls"
+    "libpthread"
+    "libuci"
+    "ipset"
 )
 
 for dep in "${REQUIRED_DEPS[@]}"; do
@@ -163,12 +236,13 @@ for dep in "${REQUIRED_DEPS[@]}"; do
     fi
 done
 
-# 6. 启用 AdGuardHome 相关配置（确保 .config 中开启）
-echo "🔹 启用 AdGuardHome 配置..."
-echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
-echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config
+# 6. 启用 AdGuardHome 相关包
+echo "🔹 启用 AdGuardHome 相关配置..."
+grep -qxF "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+grep -qxF "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" .config || echo "CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y" >> .config
 
 echo "✅ AdGuardHome 组件集成完成"
+
 
 # -------------------- 修改默认配置 --------------------
 echo "🔧 修改默认配置..."
