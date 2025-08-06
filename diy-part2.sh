@@ -5,17 +5,16 @@
 # Target: CM520-79F (IPQ40xx, ARMv7)
 #
 
-set -e  # 遇到错误立即退出
-
 # -------------------- 基础配置与变量定义 --------------------
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 
+OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
+ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
-mkdir -p "$DTS_DIR"
-
+mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$DTS_DIR"
 
 # -------------------- 内核模块与工具配置 --------------------
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
@@ -52,6 +51,54 @@ TARGET_DEVICES += mobipromo_cm520-79f
 EOF
 fi
 
+# -------------------- OpenClash 核心集成 --------------------
+echo "Integrating OpenClash mihomo core..."
+rm -rf "$OPENCLASH_CORE_DIR"/*
+MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.12/mihomo-linux-armv7-v1.19.12.gz"
+wget $WGET_OPTS -O "$OPENCLASH_CORE_DIR/clash_meta.gz" "$MIHOMO_URL"
+gunzip -f "$OPENCLASH_CORE_DIR/clash_meta.gz"
+chmod +x "$OPENCLASH_CORE_DIR/clash_meta"
+
+# -------------------- 集成AdGuardHome核心 --------------------
+echo "开始集成AdGuardHome核心..."
+
+# 清理历史文件
+rm -rf "$ADGUARD_DIR/AdGuardHome" "$ADGUARD_DIR/AdGuardHome.tar.gz"
+
+# 下载AdGuardHome核心
+ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest |
+              grep "browser_download_url.*linux_armv7" |
+              cut -d '"' -f 4)
+
+if [ -n "$ADGUARD_URL" ]; then
+    echo "下载AdGuardHome: $ADGUARD_URL"
+    if wget $WGET_OPTS -O "$ADGUARD_DIR/AdGuardHome.tar.gz" "$ADGUARD_URL"; then
+        # 解压到临时目录，查看实际目录结构
+        TMP_DIR=$(mktemp -d)
+        tar -zxf "$ADGUARD_DIR/AdGuardHome.tar.gz" -C "$TMP_DIR" --warning=no-unknown-keyword
+        
+        # 查找解压后的AdGuardHome可执行文件路径（兼容不同目录结构）
+        ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
+        if [ -n "$ADG_EXE" ]; then
+            # 复制可执行文件到目标目录
+            cp "$ADG_EXE" "$ADGUARD_DIR/"
+            chmod +x "$ADGUARD_DIR/AdGuardHome"
+            echo "AdGuardHome核心复制成功"
+        else
+            echo "警告：未找到AdGuardHome可执行文件"
+        fi
+        
+        # 清理临时文件
+        rm -rf "$TMP_DIR" "$ADGUARD_DIR/AdGuardHome.tar.gz"
+    else
+        echo "警告：AdGuardHome下载失败"
+    fi
+else
+    echo "警告：未找到AdGuardHome核心地址"
+fi
+
+echo "AdGuardHome核心集成完成"
+
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
@@ -66,117 +113,8 @@ git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git package/cus
 echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
-# -------------------- 集成 AdGuardHome --------------------
-
-echo "📦 集成 AdGuardHome 组件（使用本地文件或远程下载）..."
-
-ADHOME_BASE="package/base-files/files/etc/adguardhome"
-BIN_URL="https://raw.githubusercontent.com/fgbfg5676/1/main/upload/main/AdGuardHome/adhome/AdGuardHome_linux_armv7.tar.gz"
-LUA_URL="https://raw.githubusercontent.com/fgbfg5676/1/main/upload/main/AdGuardHome/adhome/luci-app-adguardhome_1.8-20221120_all.ipk"
-LANG_URL="https://raw.githubusercontent.com/fgbfg5676/1/main/upload/main/AdGuardHome/adhome/luci-i18n-adguardhome-zh-cn_git-22.323.68542-450e04a_all.ipk"
-YAML_URL="https://raw.githubusercontent.com/fgbfg5676/1/main/upload/main/AdGuardHome/adhome/AdGuardHome.yaml"
-
-# 创建目录
-mkdir -p files/usr/bin
-mkdir -p files/etc/init.d
-mkdir -p files/etc
-mkdir -p "$ADHOME_BASE"
-
-# 下载 AdGuardHome 主程序
-echo "🔹 下载 AdGuardHome 二进制文件..."
-curl -L "$BIN_URL" -o "$ADHOME_BASE/AdGuardHome_linux_armv7.tar.gz"
-tar -xzf "$ADHOME_BASE/AdGuardHome_linux_armv7.tar.gz" -C "$ADHOME_BASE"
-mv "$ADHOME_BASE/AdGuardHome/AdGuardHome" files/usr/bin/
-chmod +x files/usr/bin/AdGuardHome
-
-# 下载配置文件
-echo "🔹 下载默认配置 AdGuardHome.yaml..."
-curl -L "$YAML_URL" -o files/etc/AdGuardHome.yaml
-
-# 创建 init 启动脚本
-echo "🔹 创建启动脚本..."
-cat > files/etc/init.d/AdGuardHome <<'EOF'
-#!/bin/sh /etc/rc.common
-START=90
-STOP=10
-
-start() {
-    /usr/bin/AdGuardHome -c /etc/AdGuardHome.yaml -w /etc/adguardhome --no-check-update &
-}
-
-stop() {
-    killall AdGuardHome
-}
-EOF
-chmod +x files/etc/init.d/AdGuardHome
-
-# 下载 luci app 和语言包
-echo "🔹 下载 LuCI 界面及中文语言包..."
-curl -L "$LUA_URL" -o luci-app-adguardhome.ipk
-curl -L "$LANG_URL" -o luci-i18n-adguardhome-zh-cn.ipk
-
-# 安装到 feeds（用这种方式保证打包进固件）
-mkdir -p package/adgh/luci
-cd package/adgh/luci
-ln -s ../../../../luci-app-adguardhome.ipk .
-ln -s ../../../../luci-i18n-adguardhome-zh-cn.ipk .
-cd ../../../..
-
-echo "✅ AdGuardHome 集成完成。"
-
-
 # -------------------- 修改默认配置 --------------------
-echo "🔧 修改默认配置..."
+sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
+sed -i 's/OpenWrt/CM520-79F/g' package/base-files/files/bin/config_generate
 
-# 强制修改所有可能的配置文件
-CONFIG_FILES=(
-    "package/base-files/files/bin/config_generate"
-    "package/base-files/files/etc/board.d/02_network"
-    "target/linux/ipq40xx/base-files/etc/board.d/02_network"
-    "target/linux/ipq40xx/base-files/etc/uci-defaults/02_network"
-)
-
-for file in "${CONFIG_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        echo "修改文件: $file"
-        sed -i 's/192.168.1.1/192.168.5.1/g' "$file"
-        sed -i 's/OpenWrt/CM520-79F/g' "$file"
-    fi
-done
-
-# 创建强制配置文件
-mkdir -p package/base-files/files/etc/uci-defaults
-cat > package/base-files/files/etc/uci-defaults/99-custom-network << 'UCIEOF'
-#!/bin/sh
-# 强制设置网络配置
-uci -q batch << UCI_EOF
-set network.lan.ipaddr='192.168.5.1'
-set network.lan.netmask='255.255.255.0'
-set system.@system[0].hostname='CM520-79F'
-commit network
-commit system
-UCI_EOF
-exit 0
-UCIEOF
-
-chmod +x package/base-files/files/etc/uci-defaults/99-custom-network
-echo "✅ 已创建强制配置文件"
-
-# 批量查找并修改所有相关文件
-find . -name "*.sh" -o -name "config_generate" -o -name "02_network" -o -name "network" 2>/dev/null | \
-while read -r file; do
-    if [ -f "$file" ] && grep -q "192.168.1.1" "$file" 2>/dev/null; then
-        sed -i 's/192.168.1.1/192.168.5.1/g' "$file"
-        echo "已修改: $file"
-    fi
-    if [ -f "$file" ] && grep -q "OpenWrt" "$file" 2>/dev/null; then
-        sed -i 's/OpenWrt/CM520-79F/g' "$file"
-    fi
-done
-
-echo "🎉 DIY脚本执行完成！"
-echo "📋 执行摘要："
-echo "   ✅ DTS 补丁已应用"
-echo "   ✅ 设备规则已添加"
-echo "   ✅ 插件已安装"
-echo "   ✅ 默认配置已修改 (IP: 192.168.5.1, 主机名: CM520-79F)"
+echo "DIY脚本执行完成"
