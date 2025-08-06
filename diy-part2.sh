@@ -102,15 +102,13 @@ echo "AdGuardHome核心集成完成"
 # -------------------- 插件集成 --------------------
 echo "Integrating sirpdboy plugins..."
 mkdir -p package/custom
-rm -rf package/custom/luci-app-watchdog package/custom/luci-app-partexp
+rm -rf package/custom/luci-app-partexp
 
-git clone --depth 1 https://github.com/sirpdboy/luci-app-watchdog.git package/custom/luci-app-watchdog
 git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git package/custom/luci-app-partexp
 
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 
 # -------------------- 修改默认配置 --------------------
