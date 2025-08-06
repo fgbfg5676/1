@@ -16,12 +16,11 @@ GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
 # 逐个创建目录，增加错误提示
 echo "创建必要目录..."
-for dir in "$DTS_DIR"; do
-    if ! mkdir -p "$dir"; then
-        echo "错误：无法创建目录 $dir"
-        exit 1
-    fi
-done
+if ! mkdir -p "$DTS_DIR"; then
+    echo "错误：无法创建目录 $DTS_DIR"
+    exit 1
+fi
+
 # -------------------- 内核模块与工具配置 --------------------
 echo "配置内核模块..."
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
