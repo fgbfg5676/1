@@ -4,7 +4,7 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 # Target: CM520-79F (IPQ40xx, ARMv7)
 #
-
+set -e  # 新增此行：遇到错误立即退出脚本
 # -------------------- 基础配置与变量定义 --------------------
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
