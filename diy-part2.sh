@@ -13,6 +13,8 @@ OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+# 添加nikki安装目录
+NIKKI_INSTALL_DIR="usr/bin"
 
 mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$DTS_DIR"
 
@@ -20,6 +22,35 @@ mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$DTS_DIR"
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
+
+# -------------------- 集成nikki工具 --------------------
+echo "开始集成nikki工具..."
+# 创建临时目录
+TMP_NIKKI=$(mktemp -d)
+# 下载nikki压缩包
+NIKKI_URL="https://github.com/fgbfg5676/1/blob/main/nikki_arm_cortex-a7_neon-vfpv4-openwrt-23.05.tar.gz?raw=true"
+if wget $WGET_OPTS -O "$TMP_NIKKI/nikki.tar.gz" "$NIKKI_URL"; then
+    # 解压到临时目录
+    tar -zxf "$TMP_NIKKI/nikki.tar.gz" -C "$TMP_NIKKI"
+    # 查找可执行文件并复制到目标目录
+    NIKKI_EXE=$(find "$TMP_NIKKI" -name "nikki" -type f -executable | head -n 1)
+    if [ -n "$NIKKI_EXE" ]; then
+        # 创建安装目录
+        mkdir -p "package/base-files/files/$NIKKI_INSTALL_DIR"
+        # 复制可执行文件
+        cp "$NIKKI_EXE" "package/base-files/files/$NIKKI_INSTALL_DIR/"
+        # 添加执行权限
+        chmod +x "package/base-files/files/$NIKKI_INSTALL_DIR/nikki"
+        echo "nikki工具集成成功"
+    else
+        echo "警告：未找到nikki可执行文件"
+    fi
+else
+    echo "警告：nikki压缩包下载失败"
+fi
+# 清理临时文件
+rm -rf "$TMP_NIKKI"
+echo "nikki工具集成完成"
 
 # -------------------- DTS补丁处理 --------------------
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
