@@ -10,12 +10,13 @@ set -e  # 遇到错误立即退出脚本
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 
-OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
+ADGUARD_CONFIG_DIR="package/luci-app-adguardhome/root/etc/adguardhome"  # AdGuard配置文件目录
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+NEW_DNS_PORT=5553  # 自定义DNS端口，避免与系统53端口冲突
 
-mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$DTS_DIR"
+mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$ADGUARD_CONFIG_DIR" "$DTS_DIR"
 
 # -------------------- 内核模块与工具配置 --------------------
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
@@ -80,19 +81,11 @@ TARGET_DEVICES += mobipromo_cm520-79f
 EOF
 fi
 
-# -------------------- OpenClash 核心集成 --------------------
-echo "Integrating OpenClash mihomo core..."
-rm -rf "$OPENCLASH_CORE_DIR"/*
-MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.12/mihomo-linux-armv7-v1.19.12.gz"
-wget $WGET_OPTS -O "$OPENCLASH_CORE_DIR/clash_meta.gz" "$MIHOMO_URL"
-gunzip -f "$OPENCLASH_CORE_DIR/clash_meta.gz"
-chmod +x "$OPENCLASH_CORE_DIR/clash_meta"
-
-# -------------------- 集成AdGuardHome核心 --------------------
-echo "开始集成AdGuardHome核心..."
+# -------------------- 集成AdGuardHome核心并修改DNS端口 --------------------
+echo "开始集成AdGuardHome核心并修改DNS端口为$NEW_DNS_PORT..."
 
 # 清理历史文件
-rm -rf "$ADGUARD_DIR/AdGuardHome" "$ADGUARD_DIR/AdGuardHome.tar.gz"
+rm -rf "$ADGUARD_DIR/AdGuardHome" "$ADGUARD_DIR/AdGuardHome.tar.gz" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
 
 # 下载AdGuardHome核心
 ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest |
@@ -102,17 +95,32 @@ ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repo
 if [ -n "$ADGUARD_URL" ]; then
     echo "下载AdGuardHome: $ADGUARD_URL"
     if wget $WGET_OPTS -O "$ADGUARD_DIR/AdGuardHome.tar.gz" "$ADGUARD_URL"; then
-        # 解压到临时目录，查看实际目录结构
+        # 解压到临时目录
         TMP_DIR=$(mktemp -d)
         tar -zxf "$ADGUARD_DIR/AdGuardHome.tar.gz" -C "$TMP_DIR" --warning=no-unknown-keyword
         
-        # 查找解压后的AdGuardHome可执行文件路径
+        # 查找可执行文件并复制
         ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
         if [ -n "$ADG_EXE" ]; then
-            # 复制可执行文件到目标目录
             cp "$ADG_EXE" "$ADGUARD_DIR/"
             chmod +x "$ADGUARD_DIR/AdGuardHome"
-            echo "AdGuardHome核心复制成功"
+            
+            # 提取默认配置文件并修改DNS端口
+            ADG_CONFIG=$(find "$TMP_DIR" -name "AdGuardHome.yaml" -type f | head -n 1)
+            if [ -n "$ADG_CONFIG" ]; then
+                # 复制配置文件到目标目录
+                cp "$ADG_CONFIG" "$ADGUARD_CONFIG_DIR/"
+                
+                # 修改DNS端口（处理两种配置格式）
+                # 格式1: 处理addresses中的端口（如0.0.0.0:53）
+                sed -i "s/0.0.0.0:53/0.0.0.0:$NEW_DNS_PORT/g" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
+                # 格式2: 处理独立的port字段
+                sed -i "/^  port: 53$/s/53/$NEW_DNS_PORT/" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
+                
+                echo "AdGuardHome DNS端口已修改为$NEW_DNS_PORT"
+            else
+                echo "警告：未找到AdGuardHome配置文件，无法修改端口"
+            fi
         else
             echo "警告：未找到AdGuardHome可执行文件"
         fi
