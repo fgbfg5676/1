@@ -4,7 +4,8 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 # Target: CM520-79F (IPQ40xx, ARMv7)
 #
-set -e  # 新增此行：遇到错误立即退出脚本
+set -e  # 遇到错误立即退出脚本
+
 # -------------------- 基础配置与变量定义 --------------------
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
@@ -13,8 +14,6 @@ OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
-# 添加nikki安装目录
-NIKKI_INSTALL_DIR="usr/bin"
 
 mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$DTS_DIR"
 
@@ -23,34 +22,33 @@ echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
 
-# -------------------- 集成nikki工具 --------------------
-echo "开始集成nikki工具..."
-# 创建临时目录
-TMP_NIKKI=$(mktemp -d)
-# 下载nikki压缩包
-NIKKI_URL="https://github.com/fgbfg5676/1/blob/main/nikki_arm_cortex-a7_neon-vfpv4-openwrt-23.05.tar.gz?raw=true"
-if wget $WGET_OPTS -O "$TMP_NIKKI/nikki.tar.gz" "$NIKKI_URL"; then
-    # 解压到临时目录
-    tar -zxf "$TMP_NIKKI/nikki.tar.gz" -C "$TMP_NIKKI"
-    # 查找可执行文件并复制到目标目录
-    NIKKI_EXE=$(find "$TMP_NIKKI" -name "nikki" -type f -executable | head -n 1)
-    if [ -n "$NIKKI_EXE" ]; then
-        # 创建安装目录
-        mkdir -p "package/base-files/files/$NIKKI_INSTALL_DIR"
-        # 复制可执行文件
-        cp "$NIKKI_EXE" "package/base-files/files/$NIKKI_INSTALL_DIR/"
-        # 添加执行权限
-        chmod +x "package/base-files/files/$NIKKI_INSTALL_DIR/nikki"
-        echo "nikki工具集成成功"
-    else
-        echo "警告：未找到nikki可执行文件"
-    fi
-else
-    echo "警告：nikki压缩包下载失败"
-fi
-# 清理临时文件
-rm -rf "$TMP_NIKKI"
-echo "nikki工具集成完成"
+# -------------------- 集成Nikki（采用官方feeds方式） --------------------
+echo "开始通过官方源集成Nikki..."
+
+# 1. 添加Nikki官方源（确保在feeds中生效）
+echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> feeds.conf.default
+
+# 2. 更新并安装Nikki相关包
+./scripts/feeds update nikki
+./scripts/feeds install -a -p nikki
+
+# 3. 在.config中启用Nikki核心组件及依赖
+echo "CONFIG_PACKAGE_nikki=y" >> .config                  # 核心程序
+echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config        # Web管理界面
+echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config # 中文语言包
+
+# 4. 强制启用Nikki依赖的内核模块和工具（根据官方README依赖列表）
+echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
+echo "CONFIG_PACKAGE_curl=y" >> .config
+echo "CONFIG_PACKAGE_yq=y" >> .config
+echo "CONFIG_PACKAGE_firewall4=y" >> .config
+echo "CONFIG_PACKAGE_ip-full=y" >> .config
+echo "CONFIG_PACKAGE_kmod-inet-diag=y" >> .config
+echo "CONFIG_PACKAGE_kmod-nft-socket=y" >> .config
+echo "CONFIG_PACKAGE_kmod-nft-tproxy=y" >> .config
+echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
+
+echo "Nikki通过官方源集成完成"
 
 # -------------------- DTS补丁处理 --------------------
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
@@ -108,7 +106,7 @@ if [ -n "$ADGUARD_URL" ]; then
         TMP_DIR=$(mktemp -d)
         tar -zxf "$ADGUARD_DIR/AdGuardHome.tar.gz" -C "$TMP_DIR" --warning=no-unknown-keyword
         
-        # 查找解压后的AdGuardHome可执行文件路径（兼容不同目录结构）
+        # 查找解压后的AdGuardHome可执行文件路径
         ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
         if [ -n "$ADG_EXE" ]; then
             # 复制可执行文件到目标目录
