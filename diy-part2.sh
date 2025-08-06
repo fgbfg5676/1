@@ -51,16 +51,6 @@ echo "CONFIG_PACKAGE_nikki=y" >> .config                  # 核心程序
 echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config        # Web管理界面
 echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config # 中文语言包
 
-# 4. 强制启用Nikki依赖的内核模块和工具
-echo "CONFIG_PACKAGE_ca-bundle=y" >> .config
-echo "CONFIG_PACKAGE_curl=y" >> .config
-echo "CONFIG_PACKAGE_yq=y" >> .config
-echo "CONFIG_PACKAGE_firewall4=y" >> .config
-echo "CONFIG_PACKAGE_ip-full=y" >> .config
-echo "CONFIG_PACKAGE_kmod-inet-diag=y" >> .config
-echo "CONFIG_PACKAGE_kmod-nft-socket=y" >> .config
-echo "CONFIG_PACKAGE_kmod-nft-tproxy=y" >> .config
-echo "CONFIG_PACKAGE_kmod-tun=y" >> .config
 
 echo "Nikki通过官方源集成完成"
 
