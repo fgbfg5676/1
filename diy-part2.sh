@@ -7,17 +7,23 @@
 set -e  # 遇到错误立即退出脚本
 
 # -------------------- 基础配置与变量定义 --------------------
+# -------------------- 基础配置与变量定义 --------------------
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 
+# 确保所有路径变量都有明确值，避免为空
+OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
-ADGUARD_CONFIG_DIR="package/luci-app-adguardhome/root/etc/adguardhome"  # AdGuard配置文件目录
+ADGUARD_CONFIG_DIR="package/luci-app-adguardhome/root/etc/adguardhome"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
-NEW_DNS_PORT=5553  # 自定义DNS端口，避免与系统53端口冲突
+NEW_DNS_PORT=5553
 
-mkdir -p "$OPENCLASH_CORE_DIR" "$ADGUARD_DIR" "$ADGUARD_CONFIG_DIR" "$DTS_DIR"
-
+# 逐个创建目录，避免因某个变量为空导致整体失败
+mkdir -p "$OPENCLASH_CORE_DIR"
+mkdir -p "$ADGUARD_DIR"
+mkdir -p "$ADGUARD_CONFIG_DIR"
+mkdir -p "$DTS_DIR"
 # -------------------- 内核模块与工具配置 --------------------
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
