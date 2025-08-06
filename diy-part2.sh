@@ -11,12 +11,8 @@ WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 
 # 确保所有路径变量都有明确值，避免为空
-OPENCLASH_CORE_DIR="package/luci-app-openclash/root/etc/openclash/core"
-ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
-ADGUARD_CONFIG_DIR="package/luci-app-adguardhome/root/etc/adguardhome"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
-NEW_DNS_PORT=5553  # 自定义DNS端口，避免冲突
 
 # 逐个创建目录，增加错误提示
 echo "创建必要目录..."
@@ -88,33 +84,6 @@ endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
 fi
-
-# -------------------- AdGuardHome修改DNS端口 --------------------
-
-# 确保NEW_DNS_PORT已定义
-if [ -z "$NEW_DNS_PORT" ]; then
-    echo "错误：NEW_DNS_PORT未定义"
-    exit 1
-fi
-
-# 确认配置文件存在
-if [ -f "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml" ]; then
-    echo "找到AdGuardHome配置文件，正在修改DNS端口为$NEW_DNS_PORT..."
-
-    # 修改DNS端口（处理多种配置格式）
-    sed -i.bak "s/:53/:$NEW_DNS_PORT/g" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
-    sed -i.bak "/^port: 53$/s/53/$NEW_DNS_PORT/" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
-    
-    # 删除备份文件
-    rm -f "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml.bak"
-    echo "DNS端口已修改为$NEW_DNS_PORT"
-else
-    echo "错误：未找到AdGuardHome配置文件 $ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
-    exit 1
-fi
-
-echo "DNS端口修改完成"
-
 
 # -------------------- 插件集成 --------------------
 echo "集成sirpdboy插件..."
