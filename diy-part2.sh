@@ -32,7 +32,8 @@ echo "配置内核模块..."
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
-
+# 新增：强制禁用 v2ray-geoview，避免编译冲突
+echo "# CONFIG_PACKAGE_v2ray-geoview is not set" >> .config
 # -------------------- 集成Nikki（采用官方feeds方式） --------------------
 echo "开始通过官方源集成Nikki..."
 
