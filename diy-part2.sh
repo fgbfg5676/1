@@ -32,8 +32,7 @@ echo "配置内核模块..."
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
-# 新增：强制禁用 v2ray-geoview，避免编译冲突
-echo "# CONFIG_PACKAGE_v2ray-geoview is not set" >> .config
+
 # -------------------- 集成Nikki（采用官方feeds方式） --------------------
 echo "开始通过官方源集成Nikki..."
 
@@ -90,78 +89,32 @@ TARGET_DEVICES += mobipromo_cm520-79f
 EOF
 fi
 
-# -------------------- 集成AdGuardHome核心并修改DNS端口 --------------------
-echo "开始集成AdGuardHome核心并修改DNS端口为$NEW_DNS_PORT..."
+# -------------------- AdGuardHome修改DNS端口 --------------------
 
-# 清理历史文件
-rm -rf "$ADGUARD_DIR/AdGuardHome" "$ADGUARD_DIR/AdGuardHome.tar.gz" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
-
-# 下载AdGuardHome核心
-ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest |
-              grep "browser_download_url.*linux_armv7" |
-              cut -d '"' -f 4)
-
-if [ -z "$ADGUARD_URL" ]; then
-    echo "警告：未找到AdGuardHome核心地址，使用默认版本"
-    ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.64/AdGuardHome_linux_armv7.tar.gz"
-fi
-
-echo "下载AdGuardHome: $ADGUARD_URL"
-if wget $WGET_OPTS -O "$ADGUARD_DIR/AdGuardHome.tar.gz" "$ADGUARD_URL"; then
-    # 解压到临时目录
-    TMP_DIR=$(mktemp -d)
-    if ! tar -zxf "$ADGUARD_DIR/AdGuardHome.tar.gz" -C "$TMP_DIR" --warning=no-unknown-keyword; then
-        echo "错误：AdGuardHome解压失败"
-        rm -rf "$TMP_DIR"
-        exit 1
-    fi
-    
-    # 查找可执行文件并复制
-    ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
-    if [ -z "$ADG_EXE" ]; then
-        echo "错误：未找到AdGuardHome可执行文件"
-        rm -rf "$TMP_DIR"
-        exit 1
-    fi
-    
-    cp "$ADG_EXE" "$ADGUARD_DIR/"
-    chmod +x "$ADGUARD_DIR/AdGuardHome"
-    echo "AdGuardHome可执行文件已复制"
-    
-    # 处理配置文件和端口修改
-    ADG_CONFIG=$(find "$TMP_DIR" -name "AdGuardHome.yaml" -type f | head -n 1)
-    if [ -n "$ADG_CONFIG" ]; then
-        cp "$ADG_CONFIG" "$ADGUARD_CONFIG_DIR/"
-        # 修改DNS端口（处理多种配置格式）
-        sed -i.bak "s/:53/:$NEW_DNS_PORT/g" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
-        sed -i.bak "/^port: 53$/s/53/$NEW_DNS_PORT/" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
-        rm -f "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml.bak"
-        echo "AdGuardHome DNS端口已修改为$NEW_DNS_PORT"
-    else
-        echo "未找到默认配置文件，创建新配置并设置端口"
-        cat <<EOF > "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
-bind_host: 0.0.0.0
-bind_port: 3000
-dns:
-  bind_host: 0.0.0.0
-  port: $NEW_DNS_PORT
-  addresses:
-    - 0.0.0.0:$NEW_DNS_PORT
-  bootstrap_dns:
-    - 114.114.114.114:53
-    - 8.8.8.8:53
-EOF
-        echo "已创建新配置文件，DNS端口设为$NEW_DNS_PORT"
-    fi
-    
-    # 清理临时文件
-    rm -rf "$TMP_DIR" "$ADGUARD_DIR/AdGuardHome.tar.gz"
-else
-    echo "错误：AdGuardHome下载失败"
+# 确保NEW_DNS_PORT已定义
+if [ -z "$NEW_DNS_PORT" ]; then
+    echo "错误：NEW_DNS_PORT未定义"
     exit 1
 fi
 
-echo "AdGuardHome核心集成完成"
+# 确认配置文件存在
+if [ -f "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml" ]; then
+    echo "找到AdGuardHome配置文件，正在修改DNS端口为$NEW_DNS_PORT..."
+
+    # 修改DNS端口（处理多种配置格式）
+    sed -i.bak "s/:53/:$NEW_DNS_PORT/g" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
+    sed -i.bak "/^port: 53$/s/53/$NEW_DNS_PORT/" "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
+    
+    # 删除备份文件
+    rm -f "$ADGUARD_CONFIG_DIR/AdGuardHome.yaml.bak"
+    echo "DNS端口已修改为$NEW_DNS_PORT"
+else
+    echo "错误：未找到AdGuardHome配置文件 $ADGUARD_CONFIG_DIR/AdGuardHome.yaml"
+    exit 1
+fi
+
+echo "DNS端口修改完成"
+
 
 # -------------------- 插件集成 --------------------
 echo "集成sirpdboy插件..."
@@ -178,7 +131,37 @@ fi
 
 # -------------------- 修改默认配置 --------------------
 echo "修改默认系统配置..."
-sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
-sed -i 's/OpenWrt/CM520-79F/g' package/base-files/files/bin/config_generate
+
+# 修改默认IP地址（192.168.1.1 → 192.168.5.1）
+# 检查config_generate文件
+if [ -f "package/base-files/files/bin/config_generate" ]; then
+    sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
+    echo "已修改 config_generate 中的默认IP"
+fi
+
+# 检查network配置文件（部分版本在此定义IP）
+if [ -f "package/base-files/files/etc/config/network" ]; then
+    sed -i "s/option ipaddr '192.168.1.1'/option ipaddr '192.168.5.1'/g" package/base-files/files/etc/config/network
+    echo "已修改 network 配置中的默认IP"
+fi
+
+# 修改默认主机名（OpenWrt → CM520-79F）
+# 检查config_generate文件
+if [ -f "package/base-files/files/bin/config_generate" ]; then
+    sed -i 's/OpenWrt/CM520-79F/g' package/base-files/files/bin/config_generate
+    echo "已修改 config_generate 中的主机名"
+fi
+
+# 检查hostname文件（直接存储主机名）
+if [ -f "package/base-files/files/etc/hostname" ]; then
+    echo "CM520-79F" > package/base-files/files/etc/hostname
+    echo "已修改 hostname 文件"
+fi
+
+# 检查system配置文件（部分版本在此定义主机名）
+if [ -f "package/base-files/files/etc/config/system" ]; then
+    sed -i "s/option hostname 'OpenWrt'/option hostname 'CM520-79F'/g" package/base-files/files/etc/config/system
+    echo "已修改 system 配置中的主机名"
+fi
 
 echo "DIY脚本执行完成"
