@@ -11,23 +11,46 @@ WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 HOSTNAME="CM520-79F"  # 自定义主机名
 TARGET_IP="192.168.5.1"  # 自定义IP地址
+ADGUARD_PORT="5353"  # 修改监听端口为 5353
+CONFIG_PATH="/etc/AdGuardHome"  # AdGuardHome 配置文件路径
 
 # 确保所有路径变量都有明确值，避免为空
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
-# 逐个创建目录，增加错误提示
+# -------------------- 创建必要目录 --------------------
 echo "创建必要目录..."
 if ! mkdir -p "$DTS_DIR"; then
     echo "错误：无法创建目录 $DTS_DIR"
     exit 1
 fi
 
+# -------------------- AdGuardHome 配置 --------------------
+echo "生成 AdGuardHome 配置文件..."
+# 确保配置目录存在
+mkdir -p "$CONFIG_PATH" || { echo "错误：无法创建AdGuardHome配置目录 $CONFIG_PATH"; exit 1; }
+# 生成配置文件
+cat <<EOF > "$CONFIG_PATH/AdGuardHome.yaml"
+# AdGuardHome 配置文件
+bind_port: $ADGUARD_PORT
+upstream_dns:
+  - 8.8.8.8
+  - 8.8.4.4
+  - 114.114.114.114
+cache_size: 1000000  # DNS缓存大小
+filtering_enabled: true
+blocking_mode: default
+EOF
+# 设置配置文件权限
+chmod 644 "$CONFIG_PATH/AdGuardHome.yaml"
+echo "AdGuardHome 配置文件已创建，路径：$CONFIG_PATH/AdGuardHome.yaml，监听端口：$ADGUARD_PORT"
+
 # -------------------- 内核模块与工具配置 --------------------
 echo "配置内核模块..."
-echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
-echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
-echo "CONFIG_PACKAGE_trx=y" >> .config
+# 先删除旧配置，确保唯一性
+sed -i "/CONFIG_PACKAGE_kmod-ubi/d" .config && echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
+sed -i "/CONFIG_PACKAGE_kmod-ubifs/d" .config && echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
+sed -i "/CONFIG_PACKAGE_trx/d" .config && echo "CONFIG_PACKAGE_trx=y" >> .config
 
 # -------------------- 集成Nikki（采用官方feeds方式） --------------------
 echo "开始通过官方源集成Nikki..."
@@ -64,11 +87,10 @@ TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 if ! wget $WGET_OPTS -O "$DTS_PATCH_FILE" "$DTS_PATCH_URL"; then
     echo "警告：DTS补丁下载失败，使用默认DTS文件"
 else
-    if [ ! -f "$TARGET_DTS" ]; then
-        echo "应用DTS补丁..."
-        if ! patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE"; then
-            echo "警告：DTS补丁应用失败，使用默认DTS文件"
-        fi
+    # 无论TARGET_DTS是否存在，尝试应用补丁
+    echo "应用DTS补丁..."
+    if ! patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE"; then
+        echo "警告：DTS补丁应用失败，使用默认DTS文件"
     fi
 fi
 
@@ -99,9 +121,10 @@ rm -rf package/custom/luci-app-partexp
 if ! git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git package/custom/luci-app-partexp; then
     echo "警告：luci-app-partexp克隆失败，跳过该插件"
 else
-    ./scripts/feeds update -a
-    ./scripts/feeds install -a
+    # -d y：自动安装所有依赖，确保完整性
+    ./scripts/feeds install -d y -p custom luci-app-partexp
     echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
+    echo "luci-app-partexp及其依赖已安装"
 fi
 
 # -------------------- 修改默认配置（修复IP和主机名） --------------------
