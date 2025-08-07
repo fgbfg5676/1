@@ -18,6 +18,7 @@ log_error() {
     echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR] $1" | tee -a "$ERROR_LOG"
     exit 1
 }
+log_warn() { echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] [WARN] $1" | tee -a "$ERROR_LOG"; }
 
 # -------------------- 1. 初始化错误日志 --------------------
 echo "===== DIY脚本错误日志 =====" > "$ERROR_LOG"
@@ -40,7 +41,8 @@ REQUIRED_MODULES=(
     "CONFIG_PACKAGE_kmod-ubi=y"
     "CONFIG_PACKAGE_kmod-ubifs=y"
     "CONFIG_PACKAGE_trx=y"
-    "CONFIG_PACKAGE_firewall3=y"  # 提前启用firewall3
+    # "CONFIG_PACKAGE_firewall3=y"  # 注释掉firewall3
+    "CONFIG_DEFAULT_firewall=y"   # 使用默认firewall
 )
 for mod in "${REQUIRED_MODULES[@]}"; do
     mod_key=$(echo "$mod" | cut -d'=' -f1)
@@ -59,86 +61,99 @@ fi
 ./scripts/feeds install -a -p nikki || log_error "Nikki包安装失败"
 echo "CONFIG_PACKAGE_nikki=y" >> .config || log_error "启用nikki失败"
 echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config || log_error "启用luci-app-nikki失败"
-log_info "Nikki通过官方源集成完成"
-# -------------------- 5. 【新增位置】防火墙兼容处理（解决递归依赖） --------------------
-# 复制以下代码到这里
-log_info "处理设备不支持firewall4的问题..."
+echo "CONFIG_PACKAGE_luci-app-fchomo=y" >> .config || log_error "启用luci-app-fchomo失败"
+echo "CONFIG_PACKAGE_geoview=y" >> .config || log_error "启用geoview失败"
+log_info "Nikki及相关包集成完成"
 
-# 1. 全局禁用firewall4（优先级最高）
-echo "CONFIG_PACKAGE_firewall4=n" >> .config
-echo "CONFIG_PACKAGE_luci-firewall4=n" >> .config  # 禁用对应LuCI界面
-
-# 2. 强制启用firewall3及配套组件
-echo "CONFIG_PACKAGE_firewall3=y" >> .config
-echo "CONFIG_PACKAGE_luci-firewall=y" >> .config  # firewall3的LuCI界面
-echo "CONFIG_PACKAGE_ip6tables=y" >> .config  # 兼容IPv6防火墙规则
-echo "CONFIG_PACKAGE_iptables=y" >> .config   # firewall3依赖的iptables工具
-
-# 3. 批量修改所有包的依赖（解决管道损坏问题）
-log_info "全局替换firewall4依赖为firewall3..."
-
-# 步骤1：将find结果保存到临时文件，避免管道损坏
+# -------------------- 5. 防火墙兼容处理（解决依赖问题） --------------------
+log_info "处理防火墙依赖问题..."
+# 1. 注释掉firewall3和firewall4的配置，使用默认firewall
+# echo "CONFIG_PACKAGE_firewall4=n" >> .config
+# echo "CONFIG_PACKAGE_luci-firewall4=n" >> .config
+# echo "CONFIG_PACKAGE_firewall3=y" >> .config
+# echo "CONFIG_PACKAGE_luci-firewall=y" >> .config
+# echo "CONFIG_PACKAGE_ip6tables=y" >> .config
+# echo "CONFIG_PACKAGE_iptables=y" >> .config
+echo "CONFIG_DEFAULT_firewall=y" >> .config  # 启用默认firewall
+# 2. 批量修改所有包的依赖，将firewall3和firewall4替换为firewall
+log_info "全局替换firewall3和firewall4依赖为firewall..."
 TMP_FILE=$(mktemp)
 find ./feeds ./package \( -name "Makefile" -o -name "Config.in" \) > "$TMP_FILE" 2>/dev/null
-
-# 步骤2：检查是否找到文件（基于临时文件内容）
 if [ ! -s "$TMP_FILE" ]; then
     log_error "未找到任何Makefile或Config.in文件，请检查路径是否正确"
 fi
-
-# 步骤3：从临时文件读取路径，逐个处理（避免管道问题）
 while read -r file; do
     [ -z "$file" ] && continue  # 跳过空行
     log_info "正在处理文件: $file"
-    # 单个文件处理失败不影响整体
-    sed -i "s/+firewall4/+firewall3/g" "$file" || log_warn "替换依赖失败: $file"
-    sed -i "/select.*firewall4/d" "$file" || log_warn "删除select失败: $file"
-    sed -i "/depends on.*firewall4/d" "$file" || log_warn "删除depends失败: $file"
+    sed -i "s/+firewall4/+firewall/g" "$file" || log_warn "替换firewall4依赖失败: $file"
+    sed -i "s/+firewall3/+firewall/g" "$file" || log_warn "替换firewall3依赖失败: $file"
+    sed -i "/select.*firewall4/d" "$file" || log_warn "删除firewall4 select失败: $file"
+    sed -i "/select.*firewall3/d" "$file" || log_warn "删除firewall3 select失败: $file"
+    sed -i "/depends on.*firewall4/d" "$file" || log_warn "删除firewall4 depends失败: $file"
+    sed -i "/depends on.*firewall3/d" "$file" || log_warn "删除firewall3 depends失败: $file"
 done < "$TMP_FILE"
-
-# 清理临时文件
 rm -f "$TMP_FILE"
 log_info "全局依赖替换完成"
 
 # -------------------- 4. 单独处理nikki的依赖（修正路径） --------------------
 log_info "单独处理nikki的依赖..."
-NIKKI_MAKEFILE=$(find ./feeds/nikki -name "Makefile" | grep -E "/nikki(/|$)" | head -n 1)
+NIKKI_MAKEFILE=$(find ./feeds/nikki -name "Makefile" | head -n 1)
 if [ -z "$NIKKI_MAKEFILE" ]; then
     log_info "未在feeds中找到，尝试全局搜索..."
     NIKKI_MAKEFILE=$(find ./ -path ./feeds -prune -o -name "Makefile" | grep -E "/nikki(/|$)" | head -n 1)
 fi
 if [ -n "$NIKKI_MAKEFILE" ] && [ -f "$NIKKI_MAKEFILE" ]; then
     log_info "找到nikki的Makefile: $NIKKI_MAKEFILE"
-    sed -i "s/firewall4/firewall3/g" "$NIKKI_MAKEFILE" || log_error "替换nikki依赖失败: $NIKKI_MAKEFILE"
+    sed -i "s/firewall4/firewall/g" "$NIKKI_MAKEFILE" || log_error "替换nikki firewall4依赖失败: $NIKKI_MAKEFILE"
+    sed -i "s/firewall3/firewall/g" "$NIKKI_MAKEFILE" || log_error "替换nikki firewall3依赖失败: $NIKKI_MAKEFILE"
     sed -i "/firewall4/d" "$NIKKI_MAKEFILE" || log_error "删除nikki中firewall4失败: $NIKKI_MAKEFILE"
+    sed -i "/firewall3/d" "$NIKKI_MAKEFILE" || log_error "删除nikki中firewall3失败: $NIKKI_MAKEFILE"
 else
     log_error "未找到nikki的Makefile！可能原因：
 1. Nikki源未正确同步（尝试重新执行./scripts/feeds update nikki）
 2. 包名不匹配（检查feeds/nikki目录下是否有nikki相关包）
 当前搜索路径：./feeds/nikki及全局（排除feeds子目录）"
 fi
-# -------------------- 5. 禁用luci-app-fchomo（更可靠的检查） --------------------
-log_info "检查并禁用luci-app-fchomo..."
-if grep -q "CONFIG_PACKAGE_luci-app-fchomo=y" .config 2>/dev/null; then
-    log_info "禁用luci-app-fchomo以打破循环依赖"
-    sed -i "s/CONFIG_PACKAGE_luci-app-fchomo=y/CONFIG_PACKAGE_luci-app-fchomo=n/" .config || log_error "禁用fchomo失败"
-else
-    log_info "luci-app-fchomo未启用，无需处理"
+
+# -------------------- 验证firewall包 --------------------
+log_info "验证firewall包安装..."
+if [ ! -d "feeds/packages/net/firewall" ] && [ ! -d "feeds/packages/net/firewall3" ]; then
+    ./scripts/feeds update packages || log_error "更新packages源失败"
+    ./scripts/feeds install firewall || log_error "安装firewall失败"
 fi
+if ! grep -q "CONFIG_DEFAULT_firewall=y" .config; then
+    echo "CONFIG_DEFAULT_firewall=y" >> .config || log_error "启用CONFIG_DEFAULT_firewall失败"
+fi
+log_info "firewall验证完成"
+
+# -------------------- 检查并修复递归依赖 --------------------
+log_info "检查luci-app-fchomo和geoview的递归依赖..."
+FCHOMO_CONFIG=$(find package/feeds -name Config.in | xargs grep -l "select PACKAGE_luci-app-fchomo")
+GEOVIEW_CONFIG=$(find package/feeds -name Config.in | xargs grep -l "select PACKAGE_geoview")
+if [ -n "$FCHOMO_CONFIG" ]; then
+    log_info "检测到luci-app-fchomo递归依赖，修复中..."
+    for file in $FCHOMO_CONFIG; do
+        sed -i "/select PACKAGE_luci-app-fchomo/d" "$file" || log_error "修复luci-app-fchomo递归依赖失败: $file"
+    done
+fi
+if [ -n "$GEOVIEW_CONFIG" ]; then
+    log_info "检测到geoview递归依赖，修复中..."
+    for file in $GEOVIEW_CONFIG; do
+        sed -i "/select PACKAGE_geoview/d" "$file" || log_error "修复geoview递归依赖失败: $file"
+    done
+fi
+log_info "递归依赖检查和修复完成"
 
 # -------------------- 6. 清理缓存并重新生成配置（输出详细日志） --------------------
 log_info "清理依赖缓存并重新生成配置..."
-rm -rf tmp/.config-package.in  # 彻底删除旧缓存
+rm -rf tmp/.*
 log_info "执行make defconfig（可能需要几分钟）..."
-# 执行make defconfig并捕获输出，便于定位错误
 if ! make defconfig > make_defconfig.log 2>&1; then
     log_error "make defconfig失败！详细日志如下："
-    cat make_defconfig.log | tee -a "$ERROR_LOG"  # 输出错误日志
+    cat make_defconfig.log | tee -a "$ERROR_LOG"
     exit 1
 fi
 log_info "配置生成成功"
-
-# -------------------- 【新增结束】 --------------------
 
 # -------------------- 6. DTS补丁处理 --------------------
 log_info "处理DTS补丁..."
