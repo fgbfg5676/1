@@ -60,7 +60,6 @@ fi
 echo "CONFIG_PACKAGE_nikki=y" >> .config || log_error "启用nikki失败"
 echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config || log_error "启用luci-app-nikki失败"
 log_info "Nikki通过官方源集成完成"
-
 # -------------------- 5. 【新增位置】防火墙兼容处理（解决递归依赖） --------------------
 # 复制以下代码到这里
 log_info "处理设备不支持firewall4的问题..."
@@ -103,23 +102,16 @@ log_info "全局依赖替换完成"
 
 # -------------------- 4. 单独处理nikki的依赖（修正路径） --------------------
 log_info "单独处理nikki的依赖..."
-# 优先搜索feeds目录（通过feeds安装的包默认存放在这里）
 NIKKI_MAKEFILE=$(find ./feeds/nikki -name "Makefile" | grep -E "/nikki(/|$)" | head -n 1)
-
-# 若feeds中未找到，尝试全局搜索（排除无关路径）
 if [ -z "$NIKKI_MAKEFILE" ]; then
     log_info "未在feeds中找到，尝试全局搜索..."
     NIKKI_MAKEFILE=$(find ./ -path ./feeds -prune -o -name "Makefile" | grep -E "/nikki(/|$)" | head -n 1)
 fi
-
-# 检查是否找到
 if [ -n "$NIKKI_MAKEFILE" ] && [ -f "$NIKKI_MAKEFILE" ]; then
     log_info "找到nikki的Makefile: $NIKKI_MAKEFILE"
-    # 替换依赖
     sed -i "s/firewall4/firewall3/g" "$NIKKI_MAKEFILE" || log_error "替换nikki依赖失败: $NIKKI_MAKEFILE"
     sed -i "/firewall4/d" "$NIKKI_MAKEFILE" || log_error "删除nikki中firewall4失败: $NIKKI_MAKEFILE"
 else
-    # 增强错误提示，指导用户检查Nikki集成
     log_error "未找到nikki的Makefile！可能原因：
 1. Nikki源未正确同步（尝试重新执行./scripts/feeds update nikki）
 2. 包名不匹配（检查feeds/nikki目录下是否有nikki相关包）
