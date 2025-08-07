@@ -100,27 +100,45 @@ done < "$TMP_FILE"
 # 清理临时文件
 rm -f "$TMP_FILE"
 log_info "全局依赖替换完成"
-# 4. 单独处理nikki的依赖（确保不残留firewall4）
-NIKKI_MAKEFILE=$(find ./ -name "Makefile" | grep "nikki$" | head -n 1)
+
+# -------------------- 4. 单独处理nikki的依赖（增强容错） --------------------
+log_info "单独处理nikki的依赖..."
+# 扩展可能的路径，确保找到Makefile
+NIKKI_MAKEFILE=$(find ./feeds/nikki ./package/nikki ./package/custom/nikki -name "Makefile" | grep "nikki$" | head -n 1)
+if [ -z "$NIKKI_MAKEFILE" ]; then
+    # 最后尝试全局搜索
+    NIKKI_MAKEFILE=$(find ./ -name "Makefile" | grep "nikki$" | head -n 1)
+fi
+
 if [ -n "$NIKKI_MAKEFILE" ]; then
-    sed -i "s/firewall4/firewall3/g" "$NIKKI_MAKEFILE"
-    sed -i "/firewall4/d" "$NIKKI_MAKEFILE"  # 彻底删除任何firewall4相关内容
-    log_info "已强制nikki依赖firewall3: $NIKKI_MAKEFILE"
+    log_info "找到nikki的Makefile: $NIKKI_MAKEFILE"
+    sed -i "s/firewall4/firewall3/g" "$NIKKI_MAKEFILE" || log_error "替换nikki依赖失败: $NIKKI_MAKEFILE"
+    sed -i "/firewall4/d" "$NIKKI_MAKEFILE" || log_error "删除nikki中firewall4失败: $NIKKI_MAKEFILE"
 else
-    log_error "未找到nikki的Makefile，无法修复依赖"
+    log_error "未找到nikki的Makefile，请检查Nikki是否正确集成"
 fi
 
-# 5. 禁用导致循环的luci-app-fchomo（若存在）
-if grep -q "CONFIG_PACKAGE_luci-app-fchomo=y" .config; then
+# -------------------- 5. 禁用luci-app-fchomo（更可靠的检查） --------------------
+log_info "检查并禁用luci-app-fchomo..."
+if grep -q "CONFIG_PACKAGE_luci-app-fchomo=y" .config 2>/dev/null; then
     log_info "禁用luci-app-fchomo以打破循环依赖"
-    sed -i "s/CONFIG_PACKAGE_luci-app-fchomo=y/CONFIG_PACKAGE_luci-app-fchomo=n/" .config
+    sed -i "s/CONFIG_PACKAGE_luci-app-fchomo=y/CONFIG_PACKAGE_luci-app-fchomo=n/" .config || log_error "禁用fchomo失败"
+else
+    log_info "luci-app-fchomo未启用，无需处理"
 fi
 
-# 6. 清理依赖缓存并重新生成配置
-rm -rf tmp/.config-package.in  # 彻底删除旧依赖缓存
-make defconfig || log_error "配置生成失败，可能存在未处理的依赖"
+# -------------------- 6. 清理缓存并重新生成配置（输出详细日志） --------------------
+log_info "清理依赖缓存并重新生成配置..."
+rm -rf tmp/.config-package.in  # 彻底删除旧缓存
+log_info "执行make defconfig（可能需要几分钟）..."
+# 执行make defconfig并捕获输出，便于定位错误
+if ! make defconfig > make_defconfig.log 2>&1; then
+    log_error "make defconfig失败！详细日志如下："
+    cat make_defconfig.log | tee -a "$ERROR_LOG"  # 输出错误日志
+    exit 1
+fi
+log_info "配置生成成功"
 
-log_info "firewall4兼容性处理完成，系统已锁定firewall3"
 # -------------------- 【新增结束】 --------------------
 
 # -------------------- 6. DTS补丁处理 --------------------
