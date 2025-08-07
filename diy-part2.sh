@@ -11,6 +11,9 @@ ADGUARD_CONF_DIR="/etc/AdGuardHome"
 ADGUARD_CONF="$ADGUARD_CONF_DIR/AdGuardHome.yaml"
 ERROR_LOG="/tmp/diy_error.log"
 
+# AdGuardHome下载地址（使用最新稳定版，确保armv7架构）
+ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_armv7.tar.gz"
+
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $1"; }
 log_error() { 
@@ -153,28 +156,48 @@ log_info "默认IP修改完成（强制生效）"
 
 # -------------------- 8. 集成AdGuardHome（核心修复） --------------------
 log_info "集成AdGuardHome（端口：$ADGUARD_PORT）..."
-ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.64/AdGuardHome_linux_armv7.tar.gz"
 ADGUARD_TMP_DIR="/tmp/adguard"
-ADGUARD_BIN_SRC="$ADGUARD_TMP_DIR/AdGuardHome"  # 二进制文件源路径
+ADGUARD_ARCHIVE="/tmp/adguard.tar.gz"
 
-# 清理旧临时文件
-rm -rf "$ADGUARD_TMP_DIR" /tmp/adguard.tar.gz
+# 清理旧文件
+rm -rf "$ADGUARD_TMP_DIR" "$ADGUARD_ARCHIVE"
 
-# 下载并解压
-wget -q -O /tmp/adguard.tar.gz "$ADGUARD_URL" || log_error "AdGuardHome下载失败"
-mkdir -p "$ADGUARD_TMP_DIR" || log_error "创建临时目录失败"
-tar -xzf /tmp/adguard.tar.gz -C "$ADGUARD_TMP_DIR" --strip-components=1 || log_error "AdGuardHome解压失败"
-
-# 验证二进制文件存在性（核心修复）
-if [ ! -f "$ADGUARD_BIN_SRC" ]; then
-    # 若直接路径不存在，搜索临时目录下的可执行文件
-    ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -maxdepth 1 -type f -name "AdGuardHome" | head -n 1)
-    [ -f "$ADGUARD_BIN_SRC" ] || log_error "未找到AdGuardHome二进制文件（解压失败）"
+# 下载并验证压缩包完整性
+log_info "下载AdGuardHome（armv7架构）..."
+if ! wget -q -O "$ADGUARD_ARCHIVE" "$ADGUARD_URL"; then
+    log_error "AdGuardHome下载失败，请检查URL：$ADGUARD_URL"
 fi
 
-# 复制二进制文件（指定明确路径，避免目录错误）
+# 检查压缩包大小（避免空文件）
+if [ $(stat -c "%s" "$ADGUARD_ARCHIVE") -lt 102400 ]; then  # 至少100KB
+    log_error "AdGuardHome压缩包过小，可能损坏"
+fi
+
+# 解压并检查内容
+log_info "解压AdGuardHome..."
+mkdir -p "$ADGUARD_TMP_DIR" || log_error "创建临时目录失败"
+if ! tar -xzf "$ADGUARD_ARCHIVE" -C "$ADGUARD_TMP_DIR"; then
+    log_error "AdGuardHome解压失败（压缩包损坏或格式错误）"
+fi
+
+# 搜索二进制文件（适配不同目录结构）
+log_info "搜索AdGuardHome二进制文件..."
+ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -type f -name "AdGuardHome" -executable | head -n 1)
+
+# 若未找到可执行文件，尝试宽松匹配（不检查可执行权限）
+if [ -z "$ADGUARD_BIN_SRC" ]; then
+    ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -type f -name "AdGuardHome" | head -n 1)
+fi
+
+# 最终验证
+if [ -z "$ADGUARD_BIN_SRC" ] || [ ! -f "$ADGUARD_BIN_SRC" ]; then
+    log_error "未找到AdGuardHome二进制文件（解压目录结构可能已变更）"
+fi
+
+# 复制二进制文件到目标路径
+log_info "找到二进制文件：$ADGUARD_BIN_SRC"
 cp "$ADGUARD_BIN_SRC" "package/base-files/files$ADGUARD_BIN" || log_error "复制AdGuardHome二进制失败"
-chmod +x "package/base-files/files$ADGUARD_BIN" || log_error "设置AdGuardHome可执行权限失败"
+chmod +x "package/base-files/files$ADGUARD_BIN" || log_error "设置可执行权限失败"
 
 # 生成配置文件
 cat <<EOF > "package/base-files/files$ADGUARD_CONF"
@@ -203,7 +226,7 @@ start_service() {
     procd_close_instance
 }
 EOF
-chmod +x "$SERVICE_SCRIPT" || log_error "设置AdGuardHome服务脚本权限失败"
+chmod +x "$SERVICE_SCRIPT" || log_error "设置服务脚本权限失败"
 
 # 解决LuCI识别问题
 LUCI_CONF="package/base-files/files/etc/config/luci"
