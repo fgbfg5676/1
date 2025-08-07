@@ -326,21 +326,33 @@ echo "CONFIG_PACKAGE_ip6tables=y" >> .config
 sed -i "/CONFIG_PACKAGE_firewall3=n/d" .config
 sed -i "/CONFIG_PACKAGE_iptables=n/d" .config
 
-# 2. 修复luci-app-fchomo自递归依赖
+# 2. 修复luci-app-fchomo自递归依赖（增强容错）
 log_info "修复luci-app-fchomo自依赖..."
-FCHOMO_CONFIG=$(find ./feeds ./package -name "Config.in" | grep "luci-app-fchomo" | head -n 1)
-FCHOMO_MAKEFILE=$(find ./feeds ./package -name "Makefile" | grep "luci-app-fchomo" | head -n 1)
-if [ -n "$FCHOMO_CONFIG" ]; then
-    # 移除自依赖配置（如 "depends on PACKAGE_luci-app-fchomo"）
-    sed -i "/depends on.*luci-app-fchomo/d" "$FCHOMO_CONFIG"
-    log_info "已修复luci-app-fchomo的Config.in: $FCHOMO_CONFIG"
-elif [ -n "$FCHOMO_MAKEFILE" ]; then
-    # 若找不到Config.in，从Makefile移除自依赖
-    sed -i "/DEPENDS.*=.*+luci-app-fchomo/d" "$FCHOMO_MAKEFILE"
-    log_info "已修复luci-app-fchomo的Makefile: $FCHOMO_MAKEFILE"
+# 扩展搜索范围，确保覆盖可能的路径
+FCHOMO_CONFIG=$(find ./feeds ./package ./tmp -name "Config.in" | grep -i "luci-app-fchomo" | head -n 1)
+FCHOMO_MAKEFILE=$(find ./feeds ./package ./tmp -name "Makefile" | grep -i "luci-app-fchomo" | head -n 1)
+
+# 检查是否找到文件
+if [ -n "$FCHOMO_CONFIG" ] && [ -f "$FCHOMO_CONFIG" ]; then
+    log_info "找到luci-app-fchomo的Config.in: $FCHOMO_CONFIG"
+    # 执行sed前先检查命令是否有效
+    if sed -i "/depends on.*luci-app-fchomo/d" "$FCHOMO_CONFIG"; then
+        log_info "成功修复luci-app-fchomo的Config.in"
+    else
+        log_warn "修复luci-app-fchomo的Config.in失败，尝试禁用该包"
+        echo "CONFIG_PACKAGE_luci-app-fchomo=n" >> .config
+    fi
+elif [ -n "$FCHOMO_MAKEFILE" ] && [ -f "$FCHOMO_MAKEFILE" ]; then
+    log_info "找到luci-app-fchomo的Makefile: $FCHOMO_MAKEFILE"
+    if sed -i "/DEPENDS.*=.*+luci-app-fchomo/d" "$FCHOMO_MAKEFILE"; then
+        log_info "成功修复luci-app-fchomo的Makefile"
+    else
+        log_warn "修复luci-app-fchomo的Makefile失败，尝试禁用该包"
+        echo "CONFIG_PACKAGE_luci-app-fchomo=n" >> .config
+    fi
 else
-    log_warn "未找到luci-app-fchomo的配置文件，尝试禁用该包"
-    echo "CONFIG_PACKAGE_luci-app-fchomo=n" >> .config
+    log_warn "未找到luci-app-fchomo的配置文件，直接禁用该包以避免错误"
+    echo "CONFIG_PACKAGE_luci-app-fchomo=n" >> .config  # 强制禁用，避免递归错误
 fi
 
 # 3. 修复geoview自递归依赖
