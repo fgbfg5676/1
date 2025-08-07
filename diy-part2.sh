@@ -67,14 +67,45 @@ echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
 log_info "Nikki通过官方源集成完成"
 
 # -------------------- 4. 处理DTS补丁 --------------------
-log_info "处理DTS补丁..."
-# 假设DTS补丁URL（日志未显示具体链接，此处为示例）
-DTS_PATCH_URL="https://example.com/dts-patch.patch"
-wget -q -O "$DTS_DIR/cm520-79f.patch" "$DTS_PATCH_URL"
-# 应用补丁（忽略失败，继续执行）
-if ! patch -d "$DTS_DIR" -p1 < "$DTS_DIR/cm520-79f.patch"; then
-    log_warn "DTS补丁应用失败，使用默认DTS"
+#!/bin/bash
+set -euo pipefail  # 严格模式，任何错误立即终止（避免继续执行导致更严重问题）
+
+# -------------------- 核心配置（务必与目标设备匹配） --------------------
+# DTS补丁关键信息（建议从官方仓库获取，确保完整性）
+DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"  # 官方可靠源
+DTS_PATCH_SHA256="6a6f6b6f7468696e67732e636f6d"  # 替换为补丁文件的实际SHA256校验值（确保文件未损坏）
+DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
+TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"  # 目标设备树文件（系统启动关键文件）
+DTS_PATCH_FILE="$DTS_DIR/cm520-79f.patch"
+BACKUP_DTS="$TARGET_DTS.backup"  # 备份文件，用于失败时恢复
+
+# -------------------- 日志与错误处理函数 --------------------
+log_info() { echo -e "[INFO] $1"; }
+log_error() { echo -e "[ERROR] $1"; exit 1; }  # 错误即终止，避免继续执行
+log_fatal() { 
+    echo -e "[FATAL] $1" 
+    # 恢复备份的DTS文件（如果存在），避免系统因损坏的DTS无法启动
+    if [ -f "$BACKUP_DTS" ]; then
+        cp "$BACKUP_DTS" "$TARGET_DTS"
+        echo "[FATAL] 已恢复原始DTS文件，系统仍可启动，请手动处理补丁问题"
+    fi
+    exit 1
+}
+
+# -------------------- 1. 验证目标DTS文件存在性（系统启动依赖） --------------------
+log_info "检查目标设备树文件..."
+if [ ! -f "$TARGET_DTS" ]; then
+    log_fatal "目标DTS文件 $TARGET_DTS 不存在！该文件是系统启动必需的，请检查源码完整性"
 fi
+
+# -------------------- 2. 备份原始DTS文件（失败时可恢复系统） --------------------
+log_info "备份原始DTS文件到 $BACKUP_DTS..."
+cp "$TARGET_DTS" "$BACKUP_DTS" || log_fatal "无法备份DTS文件，无权限或磁盘满"
+
+# -------------------- 3. 下载补丁并校验完整性（防止文件损坏） --------------------
+log_info "下载DTS补丁并校验完整性..."
+if ! wget -q -O "$DTS_PATCH_FILE" "$DTS_PATCH_URL"; then
+    log_fatal "补丁下载失败（URL无效或网络问题），请检查 $DTS_PATCH_URL
 
 # -------------------- 5. 配置设备规则 --------------------
 log_info "配置设备规则..."
