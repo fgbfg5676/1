@@ -314,6 +314,56 @@ EOF
 fi
 log_info "AdGuardHome集成完成"
 
+# -------------------- 额外修复：依赖缺失与递归问题 --------------------
+log_info "处理firewall3依赖缺失与递归依赖错误..."
+
+# 1. 确保firewall3被强制启用（解决依赖缺失警告）
+log_info "强制启用firewall3及其依赖..."
+echo "CONFIG_PACKAGE_firewall3=y" >> .config
+echo "CONFIG_PACKAGE_iptables=y" >> .config
+echo "CONFIG_PACKAGE_ip6tables=y" >> .config
+# 刷新配置，确保生效
+sed -i "/CONFIG_PACKAGE_firewall3=n/d" .config
+sed -i "/CONFIG_PACKAGE_iptables=n/d" .config
+
+# 2. 修复luci-app-fchomo自递归依赖
+log_info "修复luci-app-fchomo自依赖..."
+FCHOMO_CONFIG=$(find ./feeds ./package -name "Config.in" | grep "luci-app-fchomo" | head -n 1)
+FCHOMO_MAKEFILE=$(find ./feeds ./package -name "Makefile" | grep "luci-app-fchomo" | head -n 1)
+if [ -n "$FCHOMO_CONFIG" ]; then
+    # 移除自依赖配置（如 "depends on PACKAGE_luci-app-fchomo"）
+    sed -i "/depends on.*luci-app-fchomo/d" "$FCHOMO_CONFIG"
+    log_info "已修复luci-app-fchomo的Config.in: $FCHOMO_CONFIG"
+elif [ -n "$FCHOMO_MAKEFILE" ]; then
+    # 若找不到Config.in，从Makefile移除自依赖
+    sed -i "/DEPENDS.*=.*+luci-app-fchomo/d" "$FCHOMO_MAKEFILE"
+    log_info "已修复luci-app-fchomo的Makefile: $FCHOMO_MAKEFILE"
+else
+    log_warn "未找到luci-app-fchomo的配置文件，尝试禁用该包"
+    echo "CONFIG_PACKAGE_luci-app-fchomo=n" >> .config
+fi
+
+# 3. 修复geoview自递归依赖
+log_info "修复geoview自依赖..."
+GEOVIEW_CONFIG=$(find ./feeds ./package -name "Config.in" | grep "geoview" | head -n 1)
+GEOVIEW_MAKEFILE=$(find ./feeds ./package -name "Makefile" | grep "geoview" | head -n 1)
+if [ -n "$GEOVIEW_CONFIG" ]; then
+    # 移除自依赖（如 "depends on PACKAGE_geoview"）
+    sed -i "/depends on.*geoview/d" "$GEOVIEW_CONFIG"
+    log_info "已修复geoview的Config.in: $GEOVIEW_CONFIG"
+elif [ -n "$GEOVIEW_MAKEFILE" ]; then
+    sed -i "/DEPENDS.*=.*+geoview/d" "$GEOVIEW_MAKEFILE"
+    log_info "已修复geoview的Makefile: $GEOVIEW_MAKEFILE"
+else
+    log_warn "未找到geoview的配置文件，尝试禁用该包"
+    echo "CONFIG_PACKAGE_geoview=n" >> .config
+fi
+
+# 4. 清理缓存并重新生成配置
+rm -rf tmp/.config-package.in
+make defconfig || log_error "最终配置生成失败，依赖问题未解决"
+
+log_info "依赖缺失与递归问题修复完成"
 # -------------------- 11. 最终验证 --------------------
 log_info "执行最终验证..."
 grep -q "$FORCE_HOSTNAME" "$HOSTNAME_FILE" || log_error "主机名文件验证失败"
