@@ -9,6 +9,8 @@ set -e  # 遇到错误立即退出脚本
 # -------------------- 基础配置与变量定义 --------------------
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
+HOSTNAME="CM520-79F"  # 自定义主机名
+TARGET_IP="192.168.5.1"  # 自定义IP地址
 
 # 确保所有路径变量都有明确值，避免为空
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
@@ -33,17 +35,23 @@ echo "开始通过官方源集成Nikki..."
 # 1. 添加Nikki官方源（确保在feeds中生效）
 if ! grep -q "nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" feeds.conf.default; then
     echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >> feeds.conf.default
+    echo "已成功添加 Nikki 源"
+else
+    echo "Nikki 源已存在"
 fi
 
 # 2. 更新并安装Nikki相关包
+echo "更新 Nikki 源..."
 ./scripts/feeds update nikki || { echo "错误：更新Nikki源失败"; exit 1; }
+
+echo "安装 Nikki 包..."
 ./scripts/feeds install -a -p nikki || { echo "错误：安装Nikki包失败"; exit 1; }
 
 # 3. 在.config中启用Nikki核心组件及依赖
+echo "启用 Nikki 相关配置..."
 echo "CONFIG_PACKAGE_nikki=y" >> .config                  # 核心程序
 echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config        # Web管理界面
 echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config # 中文语言包
-
 
 echo "Nikki通过官方源集成完成"
 
@@ -96,39 +104,73 @@ else
     echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 fi
 
-# -------------------- 修改默认配置 --------------------
+# -------------------- 修改默认配置（修复IP和主机名） --------------------
 echo "修改默认系统配置..."
 
-# 修改默认IP地址（192.168.1.1 → 192.168.5.1）
-# 检查config_generate文件
+# 修正IP地址修改逻辑
+echo "修改默认IP地址为 $TARGET_IP..."
+# 优先尝试设备专属网络配置（IPQ40xx平台）
+NETWORK_FILE="target/linux/ipq40xx/base-files/etc/config/network"
+if [ ! -f "$NETWORK_FILE" ]; then
+  # 若设备专属文件不存在，使用通用路径
+  NETWORK_FILE="package/base-files/files/etc/config/network"
+fi
+
+if [ -f "$NETWORK_FILE" ]; then
+  # 兼容单引号、双引号或无引号的情况
+  sed -i 's/option ipaddr[[:space:]]*[\"\']192.168.1.1[\"\']/option ipaddr '"'$TARGET_IP'"'/g' "$NETWORK_FILE"
+  echo "已修改 $NETWORK_FILE 中的默认IP"
+  # 调试输出
+  echo "调试：修改后的IP配置内容："
+  grep "ipaddr" "$NETWORK_FILE"
+else
+  echo "警告：未找到网络配置文件，IP修改可能失败"
+fi
+
+# 辅助修改config_generate（防止fallback配置）
 if [ -f "package/base-files/files/bin/config_generate" ]; then
-    sed -i 's/192.168.1.1/192.168.5.1/g' package/base-files/files/bin/config_generate
-    echo "已修改 config_generate 中的默认IP"
+  sed -i "s/192.168.1.1/$TARGET_IP/g" package/base-files/files/bin/config_generate
+  echo "已修改 config_generate 中的默认IP"
 fi
 
-# 检查network配置文件（部分版本在此定义IP）
-if [ -f "package/base-files/files/etc/config/network" ]; then
-    sed -i "s/option ipaddr '192.168.1.1'/option ipaddr '192.168.5.1'/g" package/base-files/files/etc/config/network
-    echo "已修改 network 配置中的默认IP"
-fi
+# 修正主机名修改逻辑
+echo "修改默认主机名为 $HOSTNAME..."
 
-# 修改默认主机名（OpenWrt → CM520-79F）
-# 检查config_generate文件
-if [ -f "package/base-files/files/bin/config_generate" ]; then
-    sed -i 's/OpenWrt/CM520-79F/g' package/base-files/files/bin/config_generate
-    echo "已修改 config_generate 中的主机名"
-fi
-
-# 检查hostname文件（直接存储主机名）
+# 1. 修改hostname文件
 if [ -f "package/base-files/files/etc/hostname" ]; then
-    echo "CM520-79F" > package/base-files/files/etc/hostname
-    echo "已修改 hostname 文件"
+  echo "$HOSTNAME" > package/base-files/files/etc/hostname
+  echo "已修改 /etc/hostname 文件"
+  # 调试输出
+  echo "调试：hostname文件内容："
+  cat package/base-files/files/etc/hostname
 fi
 
-# 检查system配置文件（部分版本在此定义主机名）
-if [ -f "package/base-files/files/etc/config/system" ]; then
-    sed -i "s/option hostname 'OpenWrt'/option hostname 'CM520-79F'/g" package/base-files/files/etc/config/system
-    echo "已修改 system 配置中的主机名"
+# 2. 修改system配置（兼容引号差异）
+SYSTEM_FILE="package/base-files/files/etc/config/system"
+if [ -f "$SYSTEM_FILE" ]; then
+  sed -i "s/option hostname[[:space:]]*[\"\']OpenWrt[\"\']/option hostname '$HOSTNAME'/g" "$SYSTEM_FILE"
+  echo "已修改 $SYSTEM_FILE 中的主机名"
+  # 调试输出
+  echo "调试：修改后的主机名配置内容："
+  grep "hostname" "$SYSTEM_FILE"
 fi
+
+# -------------------- 创建uci初始化脚本，确保配置生效 --------------------
+echo "创建uci初始化脚本，确保配置生效..."
+
+UCI_DEFAULTS_DIR="package/base-files/files/etc/uci-defaults"
+mkdir -p "$UCI_DEFAULTS_DIR"
+cat <<EOF > "$UCI_DEFAULTS_DIR/99-custom-settings"
+#!/bin/sh
+# 强制设置主机名
+uci set system.@system[0].hostname='$HOSTNAME'
+# 强制设置IP地址
+uci set network.lan.ipaddr='$TARGET_IP'
+uci commit system
+uci commit network
+exit 0
+EOF
+chmod +x "$UCI_DEFAULTS_DIR/99-custom-settings"
+echo "已创建uci初始化脚本，确保配置生效"
 
 echo "DIY脚本执行完成"
