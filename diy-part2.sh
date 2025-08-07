@@ -22,16 +22,15 @@ log_error() {
 echo "===== DIY脚本错误日志 =====" > "$ERROR_LOG"
 echo "开始时间: $(date)" >> "$ERROR_LOG"
 
-# -------------------- 1. 创建必要目录（含系统配置文件目录） --------------------
+# -------------------- 1. 创建必要目录 --------------------
 log_info "创建必要目录..."
-# 确保系统配置文件目录存在（关键修复）
 mkdir -p \
     "target/linux/ipq40xx/files/arch/arm/boot/dts" \
     "package/custom" \
     "package/base-files/files$ADGUARD_CONF_DIR" \
     "package/base-files/files/usr/bin" \
     "package/base-files/files/etc/uci-defaults" \
-    "package/base-files/files/etc/config"  # 确保/etc/config目录存在
+    "package/base-files/files/etc/config"
 log_info "必要目录创建完成"
 
 # -------------------- 2. 配置内核模块 --------------------
@@ -101,55 +100,44 @@ else
     log_info "设备规则已存在，跳过"
 fi
 
-# -------------------- 6. 强制修改主机名（核心修复：确保system文件存在） --------------------
+# -------------------- 6. 强制修改主机名 --------------------
 log_info "强制修改主机名为：$FORCE_HOSTNAME..."
-# 1. 修改hostname文件
 HOSTNAME_FILE="package/base-files/files/etc/hostname"
 echo "$FORCE_HOSTNAME" > "$HOSTNAME_FILE" || log_error "写入hostname文件失败"
 
-# 2. 修改或创建system配置文件（关键修复）
 SYSTEM_CONF="package/base-files/files/etc/config/system"
-# 确保文件存在（即使为空）
 if [ ! -f "$SYSTEM_CONF" ]; then
     log_info "系统配置文件不存在，创建新文件：$SYSTEM_CONF"
-    touch "$SYSTEM_CONF" || log_error "创建system配置文件失败（权限问题）"
-    # 写入基础配置结构
     cat <<EOF > "$SYSTEM_CONF"
 config system
-    option hostname 'OpenWrt'  # 临时值，后续会被替换
+    option hostname 'OpenWrt'
     option timezone 'UTC'
 EOF
 fi
 
-# 替换hostname配置
 if grep -q "option hostname" "$SYSTEM_CONF"; then
     sed -i "s/option hostname.*/option hostname '$FORCE_HOSTNAME'/" "$SYSTEM_CONF" || log_error "修改system配置失败"
 else
-    # 向config system块中添加hostname
-    sed -i "/config system/a \    option hostname '$FORCE_HOSTNAME'" "$SYSTEM_CONF" || log_error "添加hostname到system配置失败"
+    sed -i "/config system/a \    option hostname '$FORCE_HOSTNAME'" "$SYSTEM_CONF" || log_error "添加hostname失败"
 fi
 log_info "主机名修改完成（强制生效）"
 
 # -------------------- 7. 强制修改IP地址 --------------------
 log_info "强制修改默认IP为：$FORCE_IP..."
 NETWORK_CONF="package/base-files/files/etc/config/network"
-# 确保网络配置文件存在
 if [ ! -f "$NETWORK_CONF" ]; then
     log_info "网络配置文件不存在，创建新文件：$NETWORK_CONF"
-    touch "$NETWORK_CONF" || log_error "创建network配置文件失败"
     cat <<EOF > "$NETWORK_CONF"
 config interface 'lan'
     option type 'bridge'
     option ifname 'eth0'
-    option ipaddr '192.168.1.1'  # 临时值
+    option ipaddr '192.168.1.1'
     option netmask '255.255.255.0'
 EOF
 fi
 
-# 替换LAN口IP
 sed -i "s/option ipaddr[[:space:]]*['\"]*[0-9.]\+['\"]*/option ipaddr '$FORCE_IP'/" "$NETWORK_CONF" || log_error "修改LAN IP失败"
 
-# 添加uci-defaults脚本确保生效
 UCI_SCRIPT="package/base-files/files/etc/uci-defaults/99-force-ip-hostname"
 cat <<EOF > "$UCI_SCRIPT"
 #!/bin/sh
@@ -163,14 +151,30 @@ EOF
 chmod +x "$UCI_SCRIPT" || log_error "设置uci脚本权限失败"
 log_info "默认IP修改完成（强制生效）"
 
-# -------------------- 8. 集成AdGuardHome --------------------
+# -------------------- 8. 集成AdGuardHome（核心修复） --------------------
 log_info "集成AdGuardHome（端口：$ADGUARD_PORT）..."
 ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.64/AdGuardHome_linux_armv7.tar.gz"
+ADGUARD_TMP_DIR="/tmp/adguard"
+ADGUARD_BIN_SRC="$ADGUARD_TMP_DIR/AdGuardHome"  # 二进制文件源路径
+
+# 清理旧临时文件
+rm -rf "$ADGUARD_TMP_DIR" /tmp/adguard.tar.gz
+
+# 下载并解压
 wget -q -O /tmp/adguard.tar.gz "$ADGUARD_URL" || log_error "AdGuardHome下载失败"
-mkdir -p /tmp/adguard
-tar -xzf /tmp/adguard.tar.gz -C /tmp/adguard --strip-components=1 || log_error "AdGuardHome解压失败"
-cp /tmp/adguard/AdGuardHome "package/base-files/files$ADGUARD_BIN" || log_error "复制AdGuardHome二进制失败"
-chmod +x "package/base-files/files$ADGUARD_BIN"
+mkdir -p "$ADGUARD_TMP_DIR" || log_error "创建临时目录失败"
+tar -xzf /tmp/adguard.tar.gz -C "$ADGUARD_TMP_DIR" --strip-components=1 || log_error "AdGuardHome解压失败"
+
+# 验证二进制文件存在性（核心修复）
+if [ ! -f "$ADGUARD_BIN_SRC" ]; then
+    # 若直接路径不存在，搜索临时目录下的可执行文件
+    ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -maxdepth 1 -type f -name "AdGuardHome" | head -n 1)
+    [ -f "$ADGUARD_BIN_SRC" ] || log_error "未找到AdGuardHome二进制文件（解压失败）"
+fi
+
+# 复制二进制文件（指定明确路径，避免目录错误）
+cp "$ADGUARD_BIN_SRC" "package/base-files/files$ADGUARD_BIN" || log_error "复制AdGuardHome二进制失败"
+chmod +x "package/base-files/files$ADGUARD_BIN" || log_error "设置AdGuardHome可执行权限失败"
 
 # 生成配置文件
 cat <<EOF > "package/base-files/files$ADGUARD_CONF"
@@ -199,7 +203,7 @@ start_service() {
     procd_close_instance
 }
 EOF
-chmod +x "$SERVICE_SCRIPT"
+chmod +x "$SERVICE_SCRIPT" || log_error "设置AdGuardHome服务脚本权限失败"
 
 # 解决LuCI识别问题
 LUCI_CONF="package/base-files/files/etc/config/luci"
