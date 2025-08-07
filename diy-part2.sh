@@ -75,16 +75,21 @@ echo "CONFIG_PACKAGE_luci-firewall=y" >> .config  # firewall3的LuCI界面
 echo "CONFIG_PACKAGE_ip6tables=y" >> .config  # 兼容IPv6防火墙规则
 echo "CONFIG_PACKAGE_iptables=y" >> .config   # firewall3依赖的iptables工具
 
-# 3. 批量修改所有包的依赖（将firewall4替换为firewall3）
+# 3. 批量修改所有包的依赖（优化语法和容错）
 log_info "全局替换firewall4依赖为firewall3..."
-find ./feeds ./package -name "Makefile" -o -name "Config.in" | while read -r file; do
-    # 替换依赖项
-    sed -i "s/+firewall4/+firewall3/g" "$file"
-    # 删除firewall4的强制选择
-    sed -i "/select.*firewall4/d" "$file"
-    # 移除仅firewall4支持的条件
-    sed -i "/depends on.*firewall4/d" "$file"
+# 修正find命令语法（用括号分组条件，避免-o逻辑错误）
+find ./feeds ./package \( -name "Makefile" -o -name "Config.in" \) | while read -r file; do
+    log_info "正在处理文件: $file"  # 输出当前处理的文件，便于定位错误
+    # 为sed命令添加容错（单个文件失败不影响整体）
+    sed -i "s/+firewall4/+firewall3/g" "$file" || log_warn "替换依赖失败: $file"
+    sed -i "/select.*firewall4/d" "$file" || log_warn "删除select失败: $file"
+    sed -i "/depends on.*firewall4/d" "$file" || log_warn "删除depends失败: $file"
 done
+
+# 检查是否有至少一个文件被处理（避免find命令未找到文件导致的隐性失败）
+if ! find ./feeds ./package \( -name "Makefile" -o -name "Config.in" \) | grep -q .; then
+    log_error "未找到任何Makefile或Config.in文件，可能路径错误"
+fi
 
 # 4. 单独处理nikki的依赖（确保不残留firewall4）
 NIKKI_MAKEFILE=$(find ./ -name "Makefile" | grep "nikki$" | head -n 1)
