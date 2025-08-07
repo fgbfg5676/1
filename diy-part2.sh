@@ -314,54 +314,6 @@ EOF
 fi
 log_info "AdGuardHome集成完成"
 
-# -------------------- 额外修复：依赖缺失与递归问题 --------------------
-log_info "处理firewall3依赖缺失与递归依赖错误..."
-
-# 1. 确保firewall3被强制启用（解决依赖缺失警告）
-log_info "强制启用firewall3及其依赖..."
-echo "CONFIG_PACKAGE_firewall3=y" >> .config
-echo "CONFIG_PACKAGE_iptables=y" >> .config
-echo "CONFIG_PACKAGE_ip6tables=y" >> .config
-# 刷新配置，确保生效
-sed -i "/CONFIG_PACKAGE_firewall3=n/d" .config
-sed -i "/CONFIG_PACKAGE_iptables=n/d" .config
-
-# 2. 修复luci-app-fchomo自递归依赖（简化逻辑，直接禁用）
-log_info "修复luci-app-fchomo自依赖..."
-# 不尝试复杂修复，直接强制禁用该包（非核心功能，不影响主流程）
-if ! grep -q "CONFIG_PACKAGE_luci-app-fchomo=n" .config 2>/dev/null; then
-    log_info "直接禁用luci-app-fchomo以避免递归依赖"
-    # 确保写入.config成功
-    if echo "CONFIG_PACKAGE_luci-app-fchomo=n" >> .config; then
-        log_info "luci-app-fchomo已禁用"
-    else
-        log_warn "写入.config失败，尝试直接修改"
-        sed -i "s/CONFIG_PACKAGE_luci-app-fchomo=.*/CONFIG_PACKAGE_luci-app-fchomo=n/" .config 2>/dev/null
-    fi
-else
-    log_info "luci-app-fchomo已禁用，无需处理"
-fi
-# 3. 修复geoview自递归依赖
-log_info "修复geoview自依赖..."
-GEOVIEW_CONFIG=$(find ./feeds ./package -name "Config.in" | grep "geoview" | head -n 1)
-GEOVIEW_MAKEFILE=$(find ./feeds ./package -name "Makefile" | grep "geoview" | head -n 1)
-if [ -n "$GEOVIEW_CONFIG" ]; then
-    # 移除自依赖（如 "depends on PACKAGE_geoview"）
-    sed -i "/depends on.*geoview/d" "$GEOVIEW_CONFIG"
-    log_info "已修复geoview的Config.in: $GEOVIEW_CONFIG"
-elif [ -n "$GEOVIEW_MAKEFILE" ]; then
-    sed -i "/DEPENDS.*=.*+geoview/d" "$GEOVIEW_MAKEFILE"
-    log_info "已修复geoview的Makefile: $GEOVIEW_MAKEFILE"
-else
-    log_warn "未找到geoview的配置文件，尝试禁用该包"
-    echo "CONFIG_PACKAGE_geoview=n" >> .config
-fi
-
-# 4. 清理缓存并重新生成配置
-rm -rf tmp/.config-package.in
-make defconfig || log_error "最终配置生成失败，依赖问题未解决"
-
-log_info "依赖缺失与递归问题修复完成"
 # -------------------- 11. 最终验证 --------------------
 log_info "执行最终验证..."
 grep -q "$FORCE_HOSTNAME" "$HOSTNAME_FILE" || log_error "主机名文件验证失败"
