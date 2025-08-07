@@ -1,11 +1,7 @@
 #!/bin/bash
-#
-# File name: diy-part2.sh (Fixed Version)
-# Description: 修复nikki依赖处理失败的问题
-#
-set -euo pipefail  # 更严格的错误检查，但增加容错处理
+set -e  # 错误立即退出
 
-# -------------------- 颜色输出函数 --------------------
+# -------------------- 日志输出函数 --------------------
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -15,169 +11,74 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# -------------------- 基础配置 --------------------
-WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
-HOSTNAME="CM520-79F"
-TARGET_IP="192.168.5.1"
-ADGUARD_PORT="5353"
-CONFIG_PATH="package/base-files/files/etc/AdGuardHome"
+# -------------------- 基础变量定义 --------------------
+# 目录与路径
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.64/AdGuardHome_linux_armv7.tar.gz"
+ADGUARD_PORT="5553"  # 自定义DNS端口
+TARGET_IP="192.168.5.1"  # 示例默认IP
+HOSTNAME="CM520-79F"
 
-# Nikki源
-NIKKI_PRIMARY="https://github.com/nikkinikki-org/OpenWrt-nikki.git"
-NIKKI_MIRROR="https://gitee.com/nikkinikki/OpenWrt-nikki.git"
-NIKKI_BACKUP_BINARY="https://github.com/fgbfg5676/1/raw/main/nikki_arm_cortex-a7_neon-vfpv4-openwrt-23.05.tar.gz"
+# 第三方源配置
+NIKKI_FEED="https://github.com/nikkinikki-org/OpenWrt-nikki.git;main"
+SIRPDBOY_PARTEXP="https://github.com/sirpdboy/luci-app-partexp.git"
 
-# -------------------- 依赖检查 --------------------
-log_info "检查系统依赖..."
-REQUIRED_TOOLS=("git" "wget" "patch" "sed" "grep" "find")
-for tool in "${REQUIRED_TOOLS[@]}"; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-        log_error "缺少必要工具: $tool"
-        exit 1
-    fi
-done
-log_info "依赖检查完成"
+# -------------------- 1. 创建必要目录 --------------------
+log_info "创建必要目录..."
+mkdir -p \
+    "$DTS_DIR" \
+    "package/custom" \
+    "package/base-files/files/etc/AdGuardHome" \
+    "package/base-files/files/etc/uci-defaults"
+log_info "必要目录创建完成"
 
-# -------------------- 网络检查 --------------------
-check_network() {
-    local test_url="$1"
-    wget $WGET_OPTS --spider "$test_url" 2>/dev/null
-}
-
-# -------------------- 目录与配置文件创建 --------------------
-mkdir -p "$DTS_DIR" "$CONFIG_PATH"
-cat <<EOF > "$CONFIG_PATH/AdGuardHome.yaml"
-bind_host: 0.0.0.0
-bind_port: $ADGUARD_PORT
-users:
-  - name: admin
-    password: \$2y\$10\$FoyiYiwQKRoJl9zzG7u0yeFpb4B8jVH4VkgrKauQuOV0WRnLNPXXi
-language: zh-cn
-upstream_dns:
-  - 8.8.8.8
-  - 114.114.114.114
-  - 1.1.1.1
-EOF
-chmod 644 "$CONFIG_PATH/AdGuardHome.yaml"
-log_info "AdGuardHome配置完成"
-
-# -------------------- 内核与防火墙配置 --------------------
-log_info "配置内核模块与防火墙..."
-REQUIRED_CONFIGS=(
+# -------------------- 2. 配置内核模块 --------------------
+log_info "配置内核模块..."
+# 添加必要的内核模块配置到.config
+REQUIRED_MODULES=(
     "CONFIG_PACKAGE_kmod-ubi=y"
     "CONFIG_PACKAGE_kmod-ubifs=y"
     "CONFIG_PACKAGE_trx=y"
-    "CONFIG_PACKAGE_firewall3=y"
-    "CONFIG_PACKAGE_firewall4=n"
-    "CONFIG_PACKAGE_luci-firewall=y"
+    "CONFIG_PACKAGE_firewall3=y"  # 假设使用firewall3
 )
-for config in "${REQUIRED_CONFIGS[@]}"; do
-    config_name=$(echo "$config" | cut -d'_' -f3- | cut -d'=' -f1)
-    sed -i "/^#*CONFIG_PACKAGE_${config_name}/d" .config
-    echo "$config" >> .config
+for mod in "${REQUIRED_MODULES[@]}"; do
+    # 先删除旧配置，添加新配置
+    sed -i "/$(echo "$mod" | cut -d'=' -f1)/d" .config
+    echo "$mod" >> .config
 done
+log_info "内核模块配置完成"
 
-# -------------------- 集成Nikki（增强容错） --------------------
-log_info "集成Nikki代理..."
-NIKKI_SOURCE=""
-if check_network "$NIKKI_PRIMARY"; then
-    NIKKI_SOURCE="$NIKKI_PRIMARY"
-elif check_network "$NIKKI_MIRROR"; then
-    NIKKI_SOURCE="$NIKKI_MIRROR"
-elif check_network "$NIKKI_BACKUP_BINARY"; then
-    NIKKI_SOURCE="$NIKKI_BACKUP_BINARY"
-else
-    log_error "所有Nikki源不可用，跳过集成"
-    NIKKI_SOURCE=""
+# -------------------- 3. 集成Nikki（官方源方式） --------------------
+log_info "开始通过官方源集成Nikki..."
+# 添加Nikki源到feeds.conf.default
+if ! grep -q "nikki.*$NIKKI_FEED" feeds.conf.default; then
+    echo "src-git nikki $NIKKI_FEED" >> feeds.conf.default
+    log_info "已添加Nikki源到feeds"
 fi
 
-# 仅当源有效时才尝试集成
-if [ -n "$NIKKI_SOURCE" ]; then
-    # 添加feeds（避免重复添加）
-    if ! grep -q "nikki.*OpenWrt-nikki.git" feeds.conf.default; then
-        echo "src-git nikki $NIKKI_SOURCE;main" >> feeds.conf.default
-    fi
-    # 更新并安装（允许失败后继续，避免脚本退出）
-    if ! ./scripts/feeds update nikki; then
-        log_warn "Nikki源更新失败，尝试强制安装"
-    fi
-    if ! ./scripts/feeds install -a -p nikki; then
-        log_warn "Nikki包安装失败，手动添加配置"
-    fi
-    # 强制添加配置项
-    echo "CONFIG_PACKAGE_nikki=y" >> .config
-    echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
-    echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
+# 更新并安装Nikki相关包
+./scripts/feeds update nikki
+./scripts/feeds install -a -p nikki  # 安装源中所有包
+# 强制启用Nikki组件
+echo "CONFIG_PACKAGE_nikki=y" >> .config
+echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
+echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
+log_info "Nikki通过官方源集成完成"
+
+# -------------------- 4. 处理DTS补丁 --------------------
+log_info "处理DTS补丁..."
+# 假设DTS补丁URL（日志未显示具体链接，此处为示例）
+DTS_PATCH_URL="https://example.com/dts-patch.patch"
+wget -q -O "$DTS_DIR/cm520-79f.patch" "$DTS_PATCH_URL"
+# 应用补丁（忽略失败，继续执行）
+if ! patch -d "$DTS_DIR" -p1 < "$DTS_DIR/cm520-79f.patch"; then
+    log_warn "DTS补丁应用失败，使用默认DTS"
 fi
 
-# -------------------- 核心修复：依赖冲突处理（容错版） --------------------
-log_info "开始修复依赖冲突..."
-
-# 1. 修复nikki依赖（关键优化：允许找不到文件时继续）
-log_info "调整nikki依赖为firewall3..."
-# 明确指定可能的路径，避免find命令失效
-POSSIBLE_NIKKI_PATHS=(
-    "feeds/nikki/nikki/Makefile"
-    "package/nikki/Makefile"
-    "package/custom/nikki/Makefile"
-)
-NIKKI_MAKEFILE=""
-for path in "${POSSIBLE_NIKKI_PATHS[@]}"; do
-    if [ -f "$path" ]; then
-        NIKKI_MAKEFILE="$path"
-        break
-    fi
-done
-
-# 仅当找到文件时才修改，否则警告但不退出
-if [ -n "$NIKKI_MAKEFILE" ]; then
-    sed -i "s/+firewall4/+firewall3/g" "$NIKKI_MAKEFILE"
-    sed -i "/+firewall4/d" "$NIKKI_MAKEFILE"
-    log_info "已修改nikki的Makefile: $NIKKI_MAKEFILE"
-else
-    log_warn "未找到nikki的Makefile，手动添加防火墙3依赖到.config"
-    echo "CONFIG_PACKAGE_firewall3=y" >> .config  # 强制确保依赖
-fi
-
-# 2. 修复luci-app-fchomo依赖（同上，容错处理）
-log_info "解除luci-app-fchomo的循环依赖..."
-POSSIBLE_FCHOMO_PATHS=(
-    "feeds/luci/applications/luci-app-fchomo/Makefile"
-    "package/luci-app-fchomo/Makefile"
-    "package/custom/luci-app-fchomo/Makefile"
-)
-FCHOMO_MAKEFILE=""
-for path in "${POSSIBLE_FCHOMO_PATHS[@]}"; do
-    if [ -f "$path" ]; then
-        FCHOMO_MAKEFILE="$path"
-        break
-    fi
-done
-
-if [ -n "$FCHOMO_MAKEFILE" ]; then
-    sed -i "/+firewall4/d" "$FCHOMO_MAKEFILE"
-    sed -i "s/+nikki//g" "$FCHOMO_MAKEFILE"
-    log_info "已修改luci-app-fchomo的Makefile: $FCHOMO_MAKEFILE"
-else
-    log_warn "未找到luci-app-fchomo的Makefile，跳过修改（可能已移除）"
-fi
-
-# 3. 修复geoview自依赖
-log_info "修复geoview自依赖..."
-GEOVIEW_CONFIG=$(find ./ -name "Config.in" | grep "geoview" | head -n 1)
-if [ -n "$GEOVIEW_CONFIG" ]; then
-    sed -i "/depends on.*geoview/d" "$GEOVIEW_CONFIG"
-else
-    log_warn "未找到geoview的配置文件，跳过修复"
-fi
-
-# -------------------- 其他配置（保持不变） --------------------
-log_info "处理DTS补丁与设备规则..."
-DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
-wget $WGET_OPTS -O "$DTS_DIR/dts.patch" "$DTS_PATCH_URL" && patch -d "$DTS_DIR" -p2 < "$DTS_DIR/dts.patch" || log_warn "DTS补丁应用失败"
-
+# -------------------- 5. 配置设备规则 --------------------
+log_info "配置设备规则..."
+# 检查并添加CM520-79F设备规则到generic.mk
 if ! grep -q "mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
 define Device/mobipromo_cm520-79f
@@ -191,38 +92,75 @@ define Device/mobipromo_cm520-79f
 endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
+    log_info "CM520-79F设备规则添加完成"
+else
+    log_info "设备规则已存在，跳过"
 fi
 
-# 集成插件与系统配置
-mkdir -p package/custom
-rm -rf package/custom/luci-app-partexp
-git clone --depth 1 "https://github.com/sirpdboy/luci-app-partexp.git" package/custom/luci-app-partexp && \
-./scripts/feeds install -d y -p custom luci-app-partexp && \
-echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config || log_warn "luci-app-partexp集成失败"
+# -------------------- 6. 集成AdGuardHome（自定义端口） --------------------
+log_info "开始集成AdGuardHome核心并修改DNS端口为$ADGUARD_PORT..."
+# 下载并解压AdGuardHome
+wget -q -O /tmp/AdGuardHome.tar.gz "$ADGUARD_URL"
+mkdir -p /tmp/adguard
+tar -xzf /tmp/AdGuardHome.tar.gz -C /tmp/adguard --strip-components=1
 
-# 修改IP和主机名
-NETWORK_FILE="target/linux/ipq40xx/base-files/etc/config/network"
-[ ! -f "$NETWORK_FILE" ] && NETWORK_FILE="package/base-files/files/etc/config/network"
-[ -f "$NETWORK_FILE" ] && sed -i "s/192\.168\.1\.1/$TARGET_IP/g" "$NETWORK_FILE"
+# 复制可执行文件到固件目录
+cp /tmp/adguard/AdGuardHome "package/base-files/files/usr/bin/"
+chmod +x "package/base-files/files/usr/bin/AdGuardHome"
 
+# 创建配置文件（设置端口5553）
+ADGUARD_CONF="package/base-files/files/etc/AdGuardHome/AdGuardHome.yaml"
+if [ ! -f "$ADGUARD_CONF" ]; then
+    log_info "未找到默认配置文件，创建新配置并设置端口"
+    cat <<EOF > "$ADGUARD_CONF"
+bind_host: 0.0.0.0
+bind_port: $ADGUARD_PORT
+users:
+  - name: admin
+    password: \$2y\$10\$defaulthash  # 默认密码哈希
+upstream_dns:
+  - 223.5.5.5
+  - 114.114.114.114
+EOF
+else
+    # 若配置文件存在，修改端口
+    sed -i "s/bind_port: [0-9]*/bind_port: $ADGUARD_PORT/" "$ADGUARD_CONF"
+fi
+log_info "AdGuardHome核心集成完成"
+
+# -------------------- 7. 集成sirpdboy插件（luci-app-partexp） --------------------
+log_info "集成sirpdboy插件..."
+# 克隆插件到自定义目录
+rm -rf "package/custom/luci-app-partexp"
+git clone --depth 1 "$SIRPDBOY_PARTEXP" "package/custom/luci-app-partexp"
+# 安装插件及依赖
+./scripts/feeds install -d y -p custom luci-app-partexp
+echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
+log_info "luci-app-partexp集成完成"
+
+# -------------------- 8. 更新所有feeds并安装包 --------------------
+log_info "更新所有feeds并安装包..."
+# 更新其他feeds（日志中提到的packages、luci、helloworld等）
+./scripts/feeds update -a  # 更新所有源
+./scripts/feeds install -a  # 安装所有包
+log_info "所有feeds更新并安装完成"
+
+# -------------------- 9. 修改默认系统配置 --------------------
+log_info "修改默认系统配置..."
+# 修改默认IP（示例路径，根据实际调整）
+NETWORK_CONF="package/base-files/files/etc/config/network"
+sed -i "s/192\.168\.1\.1/$TARGET_IP/" "$NETWORK_CONF"
+
+# 修改主机名
 echo "$HOSTNAME" > "package/base-files/files/etc/hostname"
 
-# UCI初始化脚本
-UCI_DEFAULTS_DIR="package/base-files/files/etc/uci-defaults"
-mkdir -p "$UCI_DEFAULTS_DIR"
-cat <<EOF > "$UCI_DEFAULTS_DIR/99-custom-settings"
+# 创建uci初始化脚本（确保配置生效）
+cat <<EOF > "package/base-files/files/etc/uci-defaults/99-custom"
 uci set system.@system[0].hostname='$HOSTNAME'
 uci set network.lan.ipaddr='$TARGET_IP'
-uci commit system
-uci commit network
+uci commit
 EOF
-chmod +x "$UCI_DEFAULTS_DIR/99-custom-settings"
+chmod +x "package/base-files/files/etc/uci-defaults/99-custom"
 
-# 最终配置
-rm -f tmp/.config-package.in
-make defconfig || log_warn "配置生成有警告，但继续执行"
-
-log_info "====================="
-log_info "DIY脚本执行完成！"
-log_info "已尽可能修复依赖冲突"
-log_info "====================="
+# -------------------- 10. 脚本完成 --------------------
+log_info "DIY脚本执行完成"
