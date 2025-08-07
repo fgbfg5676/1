@@ -129,12 +129,24 @@ EOF
 chmod 644 "$CONFIG_PATH/AdGuardHome.yaml"
 log_info "AdGuardHome 配置文件已创建，路径：$CONFIG_PATH/AdGuardHome.yaml，监听端口：$ADGUARD_PORT"
 
-# -------------------- 内核模块与工具配置 --------------------
+# -------------------- 内核模块与工具配置（增强版） --------------------
 log_info "配置内核模块..."
-# 先删除旧配置，确保唯一性
-sed -i "/CONFIG_PACKAGE_kmod-ubi/d" .config && echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
-sed -i "/CONFIG_PACKAGE_kmod-ubifs/d" .config && echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
-sed -i "/CONFIG_PACKAGE_trx/d" .config && echo "CONFIG_PACKAGE_trx=y" >> .config
+# 严格添加配置项，先删除所有相关行（包括注释和变体），再写入干净配置
+REQUIRED_CONFIGS=(
+    "CONFIG_PACKAGE_kmod-ubi=y"
+    "CONFIG_PACKAGE_kmod-ubifs=y"
+    "CONFIG_PACKAGE_trx=y"
+)
+
+for config in "${REQUIRED_CONFIGS[@]}"; do
+    # 提取配置项名称（如从CONFIG_PACKAGE_kmod-ubi=y中提取kmod-ubi）
+    config_name=$(echo "$config" | cut -d'_' -f3- | cut -d'=' -f1)
+    # 删除所有包含该配置项的行（包括注释和不同格式）
+    sed -i "/^#*CONFIG_PACKAGE_${config_name}/d" .config
+    # 在.config末尾添加干净的配置项
+    echo "$config" >> .config
+    log_info "已添加配置项: $config"
+done
 
 # -------------------- 集成Nikki（采用官方feeds方式，增强错误处理） --------------------
 log_info "开始通过官方源集成Nikki..."
@@ -458,7 +470,7 @@ EOF
 chmod +x "$UCI_DEFAULTS_DIR/99-custom-settings"
 log_info "已创建uci初始化脚本，确保配置生效"
 
-# -------------------- 最终验证 --------------------
+# -------------------- 最终验证（增强版） --------------------
 log_info "执行最终验证..."
 
 # 验证关键文件是否存在
@@ -475,21 +487,26 @@ for file in "${CRITICAL_FILES[@]}"; do
     fi
 done
 
-# 验证.config中的关键配置
-REQUIRED_CONFIGS=(
-    "CONFIG_PACKAGE_kmod-ubi=y"
-    "CONFIG_PACKAGE_kmod-ubifs=y"
-    "CONFIG_PACKAGE_trx=y"
-)
-
+# 验证.config中的关键配置（严格匹配非注释行）
 for config in "${REQUIRED_CONFIGS[@]}"; do
-    if ! grep -q "$config" .config; then
-        log_warn "配置项可能缺失: $config"
+    # 仅匹配非注释、无多余空格的有效配置项
+    if ! grep -q "^[[:space:]]*$config[[:space:]]*$" .config; then
+        # 二次添加配置项，防止被其他步骤覆盖
+        echo "$config" >> .config
+        log_warn "配置项已二次添加（可能被覆盖）: $config"
     fi
 done
 
 log_info "====================="
 log_info "DIY脚本执行完成！"
+log_info "====================="
+log_info "请执行以下步骤确认配置："
+log_info "1. 运行 'make menuconfig'"
+log_info "2. 在菜单中搜索并确认勾选："
+log_info "   - Kernel modules -> Filesystems -> kmod-ubi"
+log_info "   - Kernel modules -> Filesystems -> kmod-ubifs"
+log_info "   - Utilities -> trx"
+log_info "3. 保存配置并退出，然后执行 'make -j$(nproc)' 编译"
 log_info "====================="
 log_info "配置摘要："
 log_info "- 目标设备: CM520-79F (IPQ40xx)"
