@@ -23,7 +23,7 @@ ARCH="armv7"
 HOSTNAME="CM520-79F"  # 自定义主机名
 TARGET_IP="192.168.5.1"  # 自定义IP地址
 ADGUARD_PORT="5353"  # 修改监听端口为 5353
-CONFIG_PATH="/etc/AdGuardHome"  # AdGuardHome 配置文件路径
+CONFIG_PATH="package/base-files/files/etc/AdGuardHome"  # AdGuardHome 配置文件路径（编译时路径）
 
 # 确保所有路径变量都有明确值，避免为空
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
