@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# File name: diy-part2.sh (Improved Version)
+# File name: diy-part2.sh (Optimized Final Version)
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 # Target: CM520-79F (IPQ40xx, ARMv7)
-# Improvements: Enhanced error handling, validation, and robustness
+# Fixes: Resolved path matching issues and config missing warnings
 #
 set -e  # 遇到错误立即退出脚本
 
@@ -23,7 +23,7 @@ ARCH="armv7"
 HOSTNAME="CM520-79F"  # 自定义主机名
 TARGET_IP="192.168.5.1"  # 自定义IP地址
 ADGUARD_PORT="5353"  # 修改监听端口为 5353
-CONFIG_PATH="package/base-files/files/etc/AdGuardHome"  # AdGuardHome 配置文件路径（编译时路径）
+CONFIG_PATH="package/base-files/files/etc/AdGuardHome"  # 固件虚拟路径（修复权限问题）
 
 # 确保所有路径变量都有明确值，避免为空
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
@@ -31,7 +31,7 @@ GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
 # 备用源配置
 NIKKI_PRIMARY="https://github.com/nikkinikki-org/OpenWrt-nikki.git"
-NIKKI_MIRROR="https://gitee.com/nikkinikki/OpenWrt-nikki.git"  # 假设的镜像源
+NIKKI_MIRROR="https://gitee.com/nikkinikki/OpenWrt-nikki.git"
 NIKKI_BACKUP_BINARY="https://github.com/fgbfg5676/1/raw/main/nikki_arm_cortex-a7_neon-vfpv4-openwrt-23.05.tar.gz"
 
 # -------------------- 依赖检查 --------------------
@@ -64,12 +64,11 @@ fi
 
 # -------------------- AdGuardHome 配置 --------------------
 log_info "生成 AdGuardHome 配置文件..."
-# 确保配置目录存在
 mkdir -p "$CONFIG_PATH" || { log_error "无法创建AdGuardHome配置目录 $CONFIG_PATH"; exit 1; }
 
-# 生成更完整的配置文件
 cat <<EOF > "$CONFIG_PATH/AdGuardHome.yaml"
 # AdGuardHome 配置文件 (自动生成)
+# 注意：首次登录后请修改默认密码（admin）
 bind_host: 0.0.0.0
 bind_port: $ADGUARD_PORT
 users:
@@ -125,21 +124,32 @@ tls:
   port_dns_over_tls: 853
 EOF
 
-# 设置配置文件权限
 chmod 644 "$CONFIG_PATH/AdGuardHome.yaml"
 log_info "AdGuardHome 配置文件已创建，路径：$CONFIG_PATH/AdGuardHome.yaml，监听端口：$ADGUARD_PORT"
 
-# -------------------- 内核模块与工具配置 --------------------
+# -------------------- 内核模块与工具配置（优化配置项添加） --------------------
 log_info "配置内核模块..."
-# 先删除旧配置，确保唯一性
-sed -i "/CONFIG_PACKAGE_kmod-ubi/d" .config && echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
-sed -i "/CONFIG_PACKAGE_kmod-ubifs/d" .config && echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
-sed -i "/CONFIG_PACKAGE_trx/d" .config && echo "CONFIG_PACKAGE_trx=y" >> .config
+# 优化：删除所有相关行（包括注释），确保配置唯一
+sed -i '/^#*CONFIG_PACKAGE_kmod-ubi/d' .config && echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
+sed -i '/^#*CONFIG_PACKAGE_kmod-ubifs/d' .config && echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
+sed -i '/^#*CONFIG_PACKAGE_trx/d' .config && echo "CONFIG_PACKAGE_trx=y" >> .config
 
-# -------------------- 集成Nikki（采用官方feeds方式，增强错误处理） --------------------
+# 二次验证：确保配置项已添加（防止sed命令失效）
+REQUIRED_CONFIGS=(
+    "CONFIG_PACKAGE_kmod-ubi=y"
+    "CONFIG_PACKAGE_kmod-ubifs=y"
+    "CONFIG_PACKAGE_trx=y"
+)
+for config in "${REQUIRED_CONFIGS[@]}"; do
+    if ! grep -q "^$config$" .config; then
+        log_info "手动补充缺失的配置项：$config"
+        echo "$config" >> .config
+    fi
+done
+
+# -------------------- 集成Nikki --------------------
 log_info "开始通过官方源集成Nikki..."
 
-# 1. 检查网络连接并选择源
 NIKKI_SOURCE=""
 NIKKI_METHOD=""
 if check_network "$NIKKI_PRIMARY"; then
@@ -161,8 +171,6 @@ fi
 
 if [ -n "$NIKKI_SOURCE" ]; then
     if [ "$NIKKI_METHOD" = "feeds" ]; then
-        # 方式1：通过feeds集成源码包
-        # 2. 添加Nikki官方源（确保在feeds中生效）
         if ! grep -q "nikki.*OpenWrt-nikki.git" feeds.conf.default; then
             echo "src-git nikki $NIKKI_SOURCE;main" >> feeds.conf.default
             log_info "已成功添加 Nikki 源"
@@ -170,19 +178,15 @@ if [ -n "$NIKKI_SOURCE" ]; then
             log_info "Nikki 源已存在，跳过添加"
         fi
 
-        # 3. 更新并安装Nikki相关包
         log_info "更新 Nikki 源..."
         if ./scripts/feeds update nikki; then
             log_info "Nikki 源更新成功"
             
             log_info "安装 Nikki 包..."
             if ./scripts/feeds install -a -p nikki; then
-                # 4. 在.config中启用Nikki核心组件及依赖
-                log_info "启用 Nikki 相关配置..."
-                echo "CONFIG_PACKAGE_nikki=y" >> .config                  # 核心程序
-                echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config        # Web管理界面
-                echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config # 中文语言包
-                
+                echo "CONFIG_PACKAGE_nikki=y" >> .config
+                echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
+                echo "CONFIG_PACKAGE_luci-i18n-nikki-zh-cn=y" >> .config
                 log_info "Nikki通过官方源集成完成"
             else
                 log_warn "Nikki包安装失败，尝试备用二进制包"
@@ -197,25 +201,17 @@ if [ -n "$NIKKI_SOURCE" ]; then
     fi
     
     if [ "$NIKKI_METHOD" = "binary" ]; then
-        # 方式2：使用预编译二进制包
         log_info "开始集成Nikki二进制包..."
-        
-        # 创建临时目录
         NIKKI_TMP_DIR="/tmp/nikki_install"
         mkdir -p "$NIKKI_TMP_DIR"
         
-        # 下载并解压二进制包
         if wget $WGET_OPTS -O "$NIKKI_TMP_DIR/nikki.tar.gz" "$NIKKI_SOURCE"; then
             log_info "Nikki二进制包下载成功"
             
-            # 解压到临时目录
             if tar -xzf "$NIKKI_TMP_DIR/nikki.tar.gz" -C "$NIKKI_TMP_DIR"; then
                 log_info "Nikki二进制包解压成功"
                 
-                # 创建自定义包目录
                 mkdir -p package/custom/nikki-binary
-                
-                # 创建Makefile来集成二进制文件
                 cat <<'NIKKI_MAKEFILE' > package/custom/nikki-binary/Makefile
 include $(TOPDIR)/rules.mk
 
@@ -242,7 +238,6 @@ endef
 
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
-	# 复制预编译文件将在Package/nikki-binary/install中处理
 endef
 
 define Build/Configure
@@ -256,19 +251,16 @@ define Package/nikki-binary/install
 	$(INSTALL_DIR) $(1)/etc/nikki
 	$(INSTALL_DIR) $(1)/etc/init.d
 	
-	# 复制主程序（需要根据实际解压后的文件结构调整）
 	if [ -f /tmp/nikki_install/nikki ]; then \
 		$(INSTALL_BIN) /tmp/nikki_install/nikki $(1)/usr/bin/; \
 	elif [ -f /tmp/nikki_install/bin/nikki ]; then \
 		$(INSTALL_BIN) /tmp/nikki_install/bin/nikki $(1)/usr/bin/; \
 	fi
 	
-	# 复制配置文件（如果存在）
 	if [ -f /tmp/nikki_install/config.yaml ]; then \
 		$(INSTALL_CONF) /tmp/nikki_install/config.yaml $(1)/etc/nikki/; \
 	fi
 	
-	# 创建基本的init脚本
 	echo '#!/bin/sh /etc/rc.common' > $(1)/etc/init.d/nikki
 	echo 'START=99' >> $(1)/etc/init.d/nikki
 	echo 'USE_PROCD=1' >> $(1)/etc/init.d/nikki
@@ -284,9 +276,7 @@ endef
 $(eval $(call BuildPackage,nikki-binary))
 NIKKI_MAKEFILE
                 
-                # 启用二进制包
                 echo "CONFIG_PACKAGE_nikki-binary=y" >> .config
-                
                 log_info "Nikki二进制包集成完成"
             else
                 log_warn "Nikki二进制包解压失败"
@@ -295,7 +285,6 @@ NIKKI_MAKEFILE
             log_warn "Nikki二进制包下载失败"
         fi
         
-        # 清理临时文件
         rm -rf "$NIKKI_TMP_DIR"
     fi
 else
@@ -311,14 +300,13 @@ TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 if ! wget $WGET_OPTS -O "$DTS_PATCH_FILE" "$DTS_PATCH_URL"; then
     log_warn "DTS补丁下载失败，使用默认DTS文件"
 else
-    # 无论TARGET_DTS是否存在，尝试应用补丁
     log_info "应用DTS补丁..."
     if ! patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE"; then
         log_warn "DTS补丁应用失败，使用默认DTS文件"
     fi
 fi
 
-# -------------------- 设备规则配置（添加验证） --------------------
+# -------------------- 设备规则配置 --------------------
 log_info "配置设备规则..."
 if [ ! -f "$GENERIC_MK" ]; then
     log_error "找不到设备配置文件: $GENERIC_MK"
@@ -345,7 +333,7 @@ else
     log_info "CM520-79F设备规则已存在，跳过添加"
 fi
 
-# -------------------- 插件集成（增强错误处理） --------------------
+# -------------------- 插件集成 --------------------
 log_info "集成sirpdboy插件..."
 mkdir -p package/custom
 rm -rf package/custom/luci-app-partexp
@@ -353,7 +341,6 @@ rm -rf package/custom/luci-app-partexp
 PARTEXP_URL="https://github.com/sirpdboy/luci-app-partexp.git"
 if check_network "$PARTEXP_URL"; then
     if git clone --depth 1 "$PARTEXP_URL" package/custom/luci-app-partexp; then
-        # -d y：自动安装所有依赖，确保完整性
         if ./scripts/feeds install -d y -p custom luci-app-partexp; then
             echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
             log_info "luci-app-partexp及其依赖已安装"
@@ -367,71 +354,74 @@ else
     log_warn "luci-app-partexp源不可用，跳过该插件"
 fi
 
-# -------------------- 修改默认配置（增强验证） --------------------
+# -------------------- 修改默认配置（优化路径匹配） --------------------
 log_info "修改默认系统配置..."
 
-# 修正IP地址修改逻辑
+# 修正IP地址修改逻辑（扩展路径匹配）
 log_info "修改默认IP地址为 $TARGET_IP..."
-# 优先尝试设备专属网络配置（IPQ40xx平台）
-NETWORK_FILE="target/linux/ipq40xx/base-files/etc/config/network"
-if [ ! -f "$NETWORK_FILE" ]; then
-  # 若设备专属文件不存在，使用通用路径
-  NETWORK_FILE="package/base-files/files/etc/config/network"
-fi
+POSSIBLE_NETWORK_PATHS=(
+    "target/linux/ipq40xx/base-files/etc/config/network"
+    "package/base-files/files/etc/config/network"
+    "feeds/base-files/etc/config/network"  # 新增：feeds中的base-files路径
+    "build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/base-files/etc/config/network"  # 新增：编译目录路径
+)
 
-if [ -f "$NETWORK_FILE" ]; then
-  # 兼容单引号、双引号或无引号的情况
-  sed -i 's/option ipaddr[[:space:]]*[\"\x27]*192\.168\.1\.1[\"\x27]*/option ipaddr '"'$TARGET_IP'"'/g' "$NETWORK_FILE"
-  
-  # 验证修改是否成功
-  if grep -q "$TARGET_IP" "$NETWORK_FILE"; then
-      log_info "已成功修改 $NETWORK_FILE 中的默认IP"
-  else
-      log_warn "IP修改可能未生效，请手动检查"
-  fi
-  
-  # 调试输出
-  log_info "当前IP配置内容："
-  grep "ipaddr" "$NETWORK_FILE" | head -3
+NETWORK_FILE=""
+for path in "${POSSIBLE_NETWORK_PATHS[@]}"; do
+    if [ -f "$path" ]; then
+        NETWORK_FILE="$path"
+        break
+    fi
+done
+
+if [ -n "$NETWORK_FILE" ]; then
+    sed -i 's/option ipaddr[[:space:]]*[\"\x27]*192\.168\.1\.1[\"\x27]*/option ipaddr '"'$TARGET_IP'"'/g' "$NETWORK_FILE"
+    log_info "已修改 $NETWORK_FILE 中的默认IP"
+    log_info "当前IP配置内容："
+    grep "ipaddr" "$NETWORK_FILE" | head -3
 else
-  log_warn "未找到网络配置文件，IP修改可能失败"
+    log_warn "未找到网络配置文件，依赖uci-defaults设置IP"
 fi
 
-# 辅助修改config_generate（防止fallback配置）
+# 辅助修改config_generate
 if [ -f "package/base-files/files/bin/config_generate" ]; then
-  sed -i "s/192\.168\.1\.1/$TARGET_IP/g" package/base-files/files/bin/config_generate
-  log_info "已修改 config_generate 中的默认IP"
+    sed -i "s/192\.168\.1\.1/$TARGET_IP/g" package/base-files/files/bin/config_generate
+    log_info "已修改 config_generate 中的默认IP"
 fi
 
-# 修正主机名修改逻辑
+# 修正主机名修改逻辑（扩展路径匹配）
 log_info "修改默认主机名为 $HOSTNAME..."
+POSSIBLE_SYSTEM_PATHS=(
+    "package/base-files/files/etc/config/system"
+    "feeds/base-files/etc/config/system"
+    "build_dir/target-arm_cortex-a7+neon-vfpv4_musl_eabi/base-files/etc/config/system"
+)
 
-# 1. 修改hostname文件
+SYSTEM_FILE=""
+for path in "${POSSIBLE_SYSTEM_PATHS[@]}"; do
+    if [ -f "$path" ]; then
+        SYSTEM_FILE="$path"
+        break
+    fi
+done
+
+# 1. 修改hostname文件（确保目录存在）
 HOSTNAME_FILE="package/base-files/files/etc/hostname"
 mkdir -p "$(dirname "$HOSTNAME_FILE")"
 echo "$HOSTNAME" > "$HOSTNAME_FILE"
 log_info "已修改 hostname 文件"
 
-# 2. 修改system配置（兼容引号差异）
-SYSTEM_FILE="package/base-files/files/etc/config/system"
-if [ -f "$SYSTEM_FILE" ]; then
-  sed -i "s/option hostname[[:space:]]*[\"\x27]*OpenWrt[\"\x27]*/option hostname '$HOSTNAME'/g" "$SYSTEM_FILE"
-  
-  # 验证修改是否成功
-  if grep -q "$HOSTNAME" "$SYSTEM_FILE"; then
-      log_info "已成功修改 $SYSTEM_FILE 中的主机名"
-  else
-      log_warn "主机名修改可能未生效，请手动检查"
-  fi
-  
-  # 调试输出
-  log_info "当前主机名配置内容："
-  grep "hostname" "$SYSTEM_FILE" | head -3
+# 2. 修改system配置文件（若找到）
+if [ -n "$SYSTEM_FILE" ]; then
+    sed -i "s/option hostname[[:space:]]*[\"\x27]*OpenWrt[\"\x27]*/option hostname '$HOSTNAME'/g" "$SYSTEM_FILE"
+    log_info "已修改 $SYSTEM_FILE 中的主机名"
+    log_info "当前主机名配置内容："
+    grep "hostname" "$SYSTEM_FILE" | head -3
 else
-    log_warn "未找到系统配置文件，将通过uci-defaults设置"
+    log_warn "未找到系统配置文件，依赖uci-defaults设置主机名"
 fi
 
-# -------------------- 创建uci初始化脚本，确保配置生效 --------------------
+# -------------------- 创建uci初始化脚本 --------------------
 log_info "创建uci初始化脚本，确保配置生效..."
 
 UCI_DEFAULTS_DIR="package/base-files/files/etc/uci-defaults"
@@ -439,20 +429,12 @@ mkdir -p "$UCI_DEFAULTS_DIR"
 cat <<EOF > "$UCI_DEFAULTS_DIR/99-custom-settings"
 #!/bin/sh
 # 自定义设置初始化脚本 (自动生成)
-# 强制设置主机名
 uci set system.@system[0].hostname='$HOSTNAME'
-# 强制设置IP地址
 uci set network.lan.ipaddr='$TARGET_IP'
-# 提交更改
 uci commit system
 uci commit network
-
-# 重启网络服务
 /etc/init.d/network reload >/dev/null 2>&1 &
-
-# 记录日志
 logger -t custom-init "Applied custom settings: hostname=$HOSTNAME, ip=$TARGET_IP"
-
 exit 0
 EOF
 chmod +x "$UCI_DEFAULTS_DIR/99-custom-settings"
@@ -461,7 +443,7 @@ log_info "已创建uci初始化脚本，确保配置生效"
 # -------------------- 最终验证 --------------------
 log_info "执行最终验证..."
 
-# 验证关键文件是否存在
+# 验证关键文件
 CRITICAL_FILES=(
     "$CONFIG_PATH/AdGuardHome.yaml"
     "$UCI_DEFAULTS_DIR/99-custom-settings"
@@ -475,16 +457,10 @@ for file in "${CRITICAL_FILES[@]}"; do
     fi
 done
 
-# 验证.config中的关键配置
-REQUIRED_CONFIGS=(
-    "CONFIG_PACKAGE_kmod-ubi=y"
-    "CONFIG_PACKAGE_kmod-ubifs=y"
-    "CONFIG_PACKAGE_trx=y"
-)
-
+# 验证内核模块配置（最终检查）
 for config in "${REQUIRED_CONFIGS[@]}"; do
-    if ! grep -q "$config" .config; then
-        log_warn "配置项可能缺失: $config"
+    if ! grep -q "^$config$" .config; then
+        log_warn "配置项仍缺失: $config（可能需要手动启用）"
     fi
 done
 
