@@ -101,23 +101,30 @@ done < "$TMP_FILE"
 rm -f "$TMP_FILE"
 log_info "全局依赖替换完成"
 
-# -------------------- 4. 单独处理nikki的依赖（增强容错） --------------------
+# -------------------- 4. 单独处理nikki的依赖（修正路径） --------------------
 log_info "单独处理nikki的依赖..."
-# 扩展可能的路径，确保找到Makefile
-NIKKI_MAKEFILE=$(find ./feeds/nikki ./package/nikki ./package/custom/nikki -name "Makefile" | grep "nikki$" | head -n 1)
+# 优先搜索feeds目录（通过feeds安装的包默认存放在这里）
+NIKKI_MAKEFILE=$(find ./feeds/nikki -name "Makefile" | grep -E "/nikki(/|$)" | head -n 1)
+
+# 若feeds中未找到，尝试全局搜索（排除无关路径）
 if [ -z "$NIKKI_MAKEFILE" ]; then
-    # 最后尝试全局搜索
-    NIKKI_MAKEFILE=$(find ./ -name "Makefile" | grep "nikki$" | head -n 1)
+    log_info "未在feeds中找到，尝试全局搜索..."
+    NIKKI_MAKEFILE=$(find ./ -path ./feeds -prune -o -name "Makefile" | grep -E "/nikki(/|$)" | head -n 1)
 fi
 
-if [ -n "$NIKKI_MAKEFILE" ]; then
+# 检查是否找到
+if [ -n "$NIKKI_MAKEFILE" ] && [ -f "$NIKKI_MAKEFILE" ]; then
     log_info "找到nikki的Makefile: $NIKKI_MAKEFILE"
+    # 替换依赖
     sed -i "s/firewall4/firewall3/g" "$NIKKI_MAKEFILE" || log_error "替换nikki依赖失败: $NIKKI_MAKEFILE"
     sed -i "/firewall4/d" "$NIKKI_MAKEFILE" || log_error "删除nikki中firewall4失败: $NIKKI_MAKEFILE"
 else
-    log_error "未找到nikki的Makefile，请检查Nikki是否正确集成"
+    # 增强错误提示，指导用户检查Nikki集成
+    log_error "未找到nikki的Makefile！可能原因：
+1. Nikki源未正确同步（尝试重新执行./scripts/feeds update nikki）
+2. 包名不匹配（检查feeds/nikki目录下是否有nikki相关包）
+当前搜索路径：./feeds/nikki及全局（排除feeds子目录）"
 fi
-
 # -------------------- 5. 禁用luci-app-fchomo（更可靠的检查） --------------------
 log_info "检查并禁用luci-app-fchomo..."
 if grep -q "CONFIG_PACKAGE_luci-app-fchomo=y" .config 2>/dev/null; then
