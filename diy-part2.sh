@@ -242,5 +242,19 @@ log_info "执行最终验证..."
 grep -q "$FORCE_HOSTNAME" "$HOSTNAME_FILE" || log_error "主机名文件验证失败"
 grep -q "$FORCE_IP" "$NETWORK_CONF" || log_error "IP配置文件验证失败"
 [ -f "package/base-files/files$ADGUARD_BIN" ] || log_error "AdGuardHome 二进制缺失"
+-------------------------------------------------------------------
+
+main() {
+    log_info "开始打补丁和修改配置"
+
+    check_files_exist
+
+    patch_firewall_dep
+    remove_feeds_adguardhome_config
+
+    log_info "补丁和配置修改完成"
+}
+
+main
 
 log_info "DIY脚本执行完成（所有功能已生效）"
