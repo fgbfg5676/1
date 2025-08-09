@@ -273,6 +273,29 @@ config adguardhome 'main'
 EOF
 fi
 log_info "AdGuardHome集成完成"
+----------------------------------------------------------------------
+--- a/package/feeds/small/luci-app-fchomo/Makefile
++++ b/package/feeds/small/luci-app-fchomo/Makefile
+@@ -9,7 +9,7 @@
+  CATEGORY:=LuCI
+  SUBMENU:=3. Applications
+  TITLE:=LuCI support for fchomo
+- DEPENDS:=+firewall3 +coreutils +coreutils-base64 +coreutils-nohup +wget-ssl
++ DEPENDS:=+firewall +coreutils +coreutils-base64 +coreutils-nohup +wget-ssl
+  PKGARCH:=all
+ 
+ include $(TOPDIR)/feeds/luci/luci.mk
+--- a/package/feeds/luci/luci-app-homeproxy/Makefile
++++ b/package/feeds/luci/luci-app-homeproxy/Makefile
+@@ -9,7 +9,7 @@
+  CATEGORY:=LuCI
+  SUBMENU:=3. Applications
+  TITLE:=LuCI support for HomeProxy
+- DEPENDS:=+firewall3 +coreutils +coreutils-base64 +coreutils-nohup +wget-ssl
++ DEPENDS:=+firewall +coreutils +coreutils-base64 +coreutils-nohup +wget-ssl
+  PKGARCH:=all
+ 
+ include $(TOPDIR)/feeds/luci/luci.mk
 
 # -------------------- 9. 最终验证 --------------------
 log_info "执行最终验证..."
