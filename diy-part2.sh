@@ -1,17 +1,10 @@
-好的，我帮你把整个 `diy-part2.sh` 整合成一个完整、流程清晰、符合你需求（出错立即停止，自动检测安装成功，firewall3 -> firewall 替换，移除 feeds adguardhome 配置，集成 Nikki 和 AdGuardHome，DTS 补丁，设备规则，主机名和IP强制设置）的脚本。
-
----
-
-```bash
 #!/bin/bash
 set -euo pipefail
 shopt -s extglob
 
-# -------------------- 日志函数 --------------------
 log_info() { echo "[$(date +'%F %T')] [INFO] $*"; }
 log_error() { echo "[$(date +'%F %T')] [ERROR] $*" >&2; exit 1; }
 
-# -------------------- 全局变量 --------------------
 FORCE_HOSTNAME="CM520-79F"
 FORCE_IP="192.168.5.1"
 ADGUARD_PORT="5353"
@@ -30,11 +23,9 @@ DTS_PATCH_FILE="$DTS_DIR/cm520-79f.patch"
 
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
-# -------------------- 初始化错误日志 --------------------
 echo "===== DIY脚本错误日志 =====" > "$ERROR_LOG"
 echo "开始时间: $(date)" >> "$ERROR_LOG"
 
-# -------------------- 1. 创建必要目录 --------------------
 log_info "创建必要目录..."
 mkdir -p \
     "$DTS_DIR" \
@@ -45,7 +36,6 @@ mkdir -p \
     "package/base-files/files/etc/config"
 log_info "必要目录创建完成"
 
-# -------------------- 2. 配置内核模块 --------------------
 log_info "配置内核模块..."
 REQUIRED_MODULES=(
     "CONFIG_PACKAGE_kmod-ubi=y"
@@ -60,7 +50,6 @@ for mod in "${REQUIRED_MODULES[@]}"; do
 done
 log_info "内核模块配置完成"
 
-# -------------------- 3. 集成 Nikki Feed 和包 --------------------
 log_info "添加 Nikki feed..."
 FEED_LINE="src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main"
 if ! grep -q "^$FEED_LINE" feeds.conf.default; then
@@ -78,7 +67,6 @@ log_info "启用 Nikki 相关包..."
 grep -q "^CONFIG_PACKAGE_nikki=y" .config || echo "CONFIG_PACKAGE_nikki=y" >> .config
 grep -q "^CONFIG_PACKAGE_luci-app-nikki=y" .config || echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
 
-# -------------------- 4. 处理 DTS 补丁 --------------------
 log_info "处理 DTS 补丁..."
 [ -f "$TARGET_DTS" ] || log_error "目标 DTS 文件不存在：$TARGET_DTS"
 cp "$TARGET_DTS" "$BACKUP_DTS" || log_error "DTS 备份失败"
@@ -91,7 +79,6 @@ patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE" || log_error "DTS 补丁应用失败
 rm -f "$DTS_PATCH_FILE"
 log_info "DTS 补丁应用完成"
 
-# -------------------- 5. 配置设备规则 --------------------
 log_info "配置设备规则..."
 if ! grep -q "mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
@@ -111,7 +98,6 @@ else
     log_info "设备规则已存在，跳过"
 fi
 
-# -------------------- 6. 强制修改主机名 --------------------
 log_info "强制修改主机名为：$FORCE_HOSTNAME"
 HOSTNAME_FILE="package/base-files/files/etc/hostname"
 echo "$FORCE_HOSTNAME" > "$HOSTNAME_FILE" || log_error "写入 hostname 文件失败"
@@ -133,7 +119,6 @@ else
 fi
 log_info "主机名修改完成"
 
-# -------------------- 7. 强制修改默认IP --------------------
 log_info "强制修改默认IP为：$FORCE_IP"
 NETWORK_CONF="package/base-files/files/etc/config/network"
 if [ ! -f "$NETWORK_CONF" ]; then
@@ -162,36 +147,27 @@ EOF
 chmod +x "$UCI_SCRIPT" || log_error "设置 UCI 脚本权限失败"
 log_info "默认IP修改完成"
 
-# -------------------- 8. 集成 AdGuardHome --------------------
 log_info "集成 AdGuardHome，端口：$ADGUARD_PORT"
-
 ADGUARD_TMP_DIR="/tmp/adguard"
 ADGUARD_ARCHIVE="/tmp/adguard.tar.gz"
-
 rm -rf "$ADGUARD_TMP_DIR" "$ADGUARD_ARCHIVE"
-
 log_info "下载 AdGuardHome (armv7)..."
 wget -q -O "$ADGUARD_ARCHIVE" "$ADGUARD_URL" || log_error "AdGuardHome 下载失败"
-
 if [ $(stat -c "%s" "$ADGUARD_ARCHIVE") -lt 102400 ]; then
     log_error "AdGuardHome 压缩包过小，可能损坏"
 fi
-
 log_info "解压 AdGuardHome..."
 mkdir -p "$ADGUARD_TMP_DIR" || log_error "创建临时目录失败"
 tar -xzf "$ADGUARD_ARCHIVE" -C "$ADGUARD_TMP_DIR" || log_error "解压失败"
-
 log_info "查找 AdGuardHome 二进制文件..."
 ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -type f -name "AdGuardHome" -executable | head -n 1)
 if [ -z "$ADGUARD_BIN_SRC" ]; then
     ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -type f -name "AdGuardHome" | head -n 1)
 fi
 [ -f "$ADGUARD_BIN_SRC" ] || log_error "未找到 AdGuardHome 二进制文件"
-
 log_info "复制二进制文件到 $ADGUARD_BIN"
 cp "$ADGUARD_BIN_SRC" "package/base-files/files$ADGUARD_BIN" || log_error "复制二进制失败"
 chmod +x "package/base-files/files$ADGUARD_BIN" || log_error "设置执行权限失败"
-
 log_info "生成配置文件"
 cat <<EOF > "package/base-files/files$ADGUARD_CONF"
 bind_host: 0.0.0.0
@@ -232,12 +208,9 @@ config adguardhome 'main'
     option enabled '1'
 EOF
 fi
-
 log_info "AdGuardHome 集成完成"
 
-# -------------------- 9. patch firewall3 -> firewall --------------------
 log_info "替换 luci-app-fchomo 和 luci-app-homeproxy 的 firewall3 依赖为 firewall"
-
 patch_firewall_dep() {
     local files=(
         "feeds/small/luci-app-fchomo/Makefile"
@@ -255,7 +228,6 @@ patch_firewall_dep() {
 }
 patch_firewall_dep
 
-# -------------------- 10. 移除 feeds 版 AdGuardHome 配置 --------------------
 log_info "移除 feeds 版 AdGuardHome 配置"
 if grep -q "CONFIG_PACKAGE_adguardhome=y" .config; then
     sed -i '/CONFIG_PACKAGE_adguardhome/d' .config
@@ -266,9 +238,9 @@ else
     log_info "无 feeds 版 AdGuardHome 配置，跳过"
 fi
 
-# -------------------- 11. 最终验证 --------------------
 log_info "执行最终验证..."
 grep -q "$FORCE_HOSTNAME" "$HOSTNAME_FILE" || log_error "主机名文件验证失败"
 grep -q "$FORCE_IP" "$NETWORK_CONF" || log_error "IP配置文件验证失败"
-[ -f "package/base-files/files$ADGUARD_BIN" ] || log_error "AdGuardHome
-```
+[ -f "package/base-files/files$ADGUARD_BIN" ] || log_error "AdGuardHome 二进制缺失"
+
+log_info "DIY脚本执行完成（所有功能已生效）"
