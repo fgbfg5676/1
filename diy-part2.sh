@@ -52,16 +52,49 @@ done
 log_info "内核模块配置完成"
 
 # -------------------- 3. 集成Nikki --------------------
-log_info "开始通过官方源集成Nikki..."
-NIKKI_FEED="https://github.com/nikkinikki-org/OpenWrt-nikki.git;main"
-if ! grep -q "nikki.*$NIKKI_FEED" feeds.conf.default; then
-    echo "src-git nikki $NIKKI_FEED" >> feeds.conf.default || log_error "添加Nikki源失败"
+#!/bin/bash
+set -euo pipefail
+
+# 1. 添加 Nikki feed（没有则添加）
+FEED_LINE="src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main"
+if ! grep -q "^$FEED_LINE" feeds.conf.default; then
+  echo "$FEED_LINE" >> feeds.conf.default
 fi
-./scripts/feeds update nikki || log_error "Nikki源更新失败"
-./scripts/feeds install -a -p nikki || log_error "Nikki包安装失败"
-echo "CONFIG_PACKAGE_nikki=y" >> .config || log_error "启用nikki失败"
-echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config || log_error "启用luci-app-nikki失败"
-log_info "Nikki通过官方源集成完成"
+
+# 2. 更新并安装 Nikki 包
+./scripts/feeds update nikki
+./scripts/feeds install -a -p nikki
+
+# 3. 确认 Nikki 包存在
+if ! grep -q "nikki" package/feeds/nikki/Makefile 2>/dev/null; then
+  echo "ERROR: Nikki package not found in feeds!"
+  exit 1
+fi
+
+# 4. 确保 .config 中启用 Nikki
+grep -q "^CONFIG_PACKAGE_nikki=y" .config || echo "CONFIG_PACKAGE_nikki=y" >> .config
+grep -q "^CONFIG_PACKAGE_luci-app-nikki=y" .config || echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
+
+# 5. 重新生成配置
+make defconfig
+
+# 6. 编译前清理（可选）
+make clean
+
+# 7. 编译 Nikki 包
+make package/feeds/nikki/nikki/compile V=s || { echo "ERROR: Nikki 编译失败"; exit 1; }
+
+# 8. 编译完成后检测编译产物
+OUTPUT_IPK="$(find bin/packages -name '*nikki*.ipk' | head -n1)"
+if [ -z "$OUTPUT_IPK" ]; then
+  echo "ERROR: Nikki 编译产物未找到！"
+  exit 1
+else
+  echo "Nikki 编译成功，产物路径：$OUTPUT_IPK"
+fi
+
+echo "所有步骤成功完成。"
+
 
 # -------------------- 4. DTS补丁处理 --------------------
 log_info "处理DTS补丁..."
