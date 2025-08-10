@@ -13,10 +13,8 @@ ADGUARD_CONF_DIR="/etc/AdGuardHome"
 ADGUARD_CONF="$ADGUARD_CONF_DIR/AdGuardHome.yaml"
 ERROR_LOG="/tmp/diy_error.log"
 
-# AdGuardHome 最新发布API
 ADGUARD_API="https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest"
 
-# DTS路径及补丁
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
@@ -24,10 +22,8 @@ DTS_PATCH_FILE="$DTS_DIR/cm520-79f.patch"
 
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
-# Nikki feed 地址
 NIKKI_FEED="https://github.com/nikkinikki-org/OpenWrt-nikki.git;main"
 
-# sirpdboy 插件仓库
 SIRPDBOY_WATCHDOG="https://github.com/sirpdboy/luci-app-watchdog.git"
 SIRPDBOY_PARTEXP="https://github.com/sirpdboy/luci-app-partexp.git"
 
@@ -54,13 +50,15 @@ mkdir -p \
     "package/base-files/files$ADGUARD_CONF_DIR" \
     "package/base-files/files/usr/bin" \
     "package/base-files/files/etc/uci-defaults" \
-    "package/base-files/files/etc/config"
+    "package/base-files/files/etc/config" \
+    "package/base-files/files/etc/init.d"
 log_info "目录准备完成"
 
 # -------------------- 2. 内核模块配置 --------------------
 
 log_info "配置内核模块..."
 for mod in CONFIG_PACKAGE_kmod-ubi CONFIG_PACKAGE_kmod-ubifs CONFIG_PACKAGE_trx CONFIG_PACKAGE_firewall3; do
+    # 删除旧配置，避免重复
     sed -i "/^#*${mod}/d" .config 2>/dev/null || true
     echo "$mod=y" >> .config
 done
@@ -72,8 +70,10 @@ log_info "集成 Nikki 源..."
 if ! grep -q "nikki.*$NIKKI_FEED" feeds.conf.default 2>/dev/null; then
     echo "src-git nikki $NIKKI_FEED" >> feeds.conf.default || log_error "添加 Nikki 源失败"
 fi
+
 ./scripts/feeds update nikki || log_error "Nikki 源更新失败"
 ./scripts/feeds install -a -p nikki || log_error "Nikki 包安装失败"
+
 grep -q "^CONFIG_PACKAGE_nikki=y" .config || echo "CONFIG_PACKAGE_nikki=y" >> .config
 grep -q "^CONFIG_PACKAGE_luci-app-nikki=y" .config || echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
 log_info "Nikki 集成完成"
@@ -156,7 +156,6 @@ EOF
 fi
 sed -i "s/option ipaddr[[:space:]]*['\"]*[0-9.]\+['\"]*/option ipaddr '$FORCE_IP'/" "$NETWORK_CONF" || log_error "修改默认IP失败"
 
-# uci默认脚本
 UCI_SCRIPT="package/base-files/files/etc/uci-defaults/99-force-ip-hostname"
 cat <<EOF > "$UCI_SCRIPT"
 #!/bin/sh
@@ -170,39 +169,50 @@ EOF
 chmod +x "$UCI_SCRIPT"
 log_info "默认主机名和IP配置完成"
 
-# -------------------- 7. 集成 AdGuardHome --------------------
+# -------------------- 7. 集成 AdGuardHome（二进制方式防冲突） --------------------
 
-log_info "集成 AdGuardHome，端口：$ADGUARD_PORT"
-ADGUARD_DIR="package/base-files/files$ADGUARD_BIN"
-ADGUARD_TMP_DIR="/tmp/adguard"
-ADGUARD_ARCHIVE="/tmp/adguard.tar.gz"
+log_info "集成 AdGuardHome 二进制（防冲突模式）..."
 
-rm -rf "$ADGUARD_TMP_DIR" "$ADGUARD_ARCHIVE"
+# 先从.config里移除可能启用的 adguardhome 包
+if grep -q "^CONFIG_PACKAGE_adguardhome=y" .config 2>/dev/null; then
+    log_info "检测到 .config 启用了 adguardhome 包，正在移除"
+    sed -i '/^CONFIG_PACKAGE_adguardhome=y/d' .config
+else
+    log_info ".config 没有启用 adguardhome 包"
+fi
 
+# 清理旧文件残留，防止冲突
+log_info "清理旧编译残留，避免文件冲突"
+make clean || true
+rm -rf build_dir/target-*/* root-* || true
+
+# 创建目录
+mkdir -p "$(dirname "$ADGUARD_BIN")" "$ADGUARD_CONF_DIR" "package/base-files/files/etc/init.d" "package/base-files/files/etc/config"
+
+# 获取下载地址
 log_info "获取 AdGuardHome 最新armv7版本下载地址..."
 ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 "$ADGUARD_API" | grep '"browser_download_url":' | grep 'linux_armv7' | cut -d '"' -f 4)
 [ -n "$ADGUARD_URL" ] || log_error "未找到有效的 AdGuardHome 下载链接"
 
+# 下载并解压
+TMP_DIR=$(mktemp -d)
+TMP_ARCHIVE="$TMP_DIR/adguard.tar.gz"
 log_info "下载 AdGuardHome..."
-wget -q -O "$ADGUARD_ARCHIVE" "$ADGUARD_URL" || log_error "AdGuardHome 下载失败"
-[ "$(stat -c%s "$ADGUARD_ARCHIVE")" -ge 102400 ] || log_error "AdGuardHome 包大小异常"
-
+wget -q -O "$TMP_ARCHIVE" "$ADGUARD_URL" || { rm -rf "$TMP_DIR"; log_error "AdGuardHome 下载失败"; }
 log_info "解压 AdGuardHome..."
-mkdir -p "$ADGUARD_TMP_DIR"
-tar -xzf "$ADGUARD_ARCHIVE" -C "$ADGUARD_TMP_DIR" || log_error "AdGuardHome 解压失败"
+tar -xzf "$TMP_ARCHIVE" -C "$TMP_DIR" || { rm -rf "$TMP_DIR"; log_error "解压失败"; }
 
-log_info "查找 AdGuardHome 二进制文件..."
-ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -type f -name AdGuardHome -executable | head -n1)
+ADGUARD_BIN_SRC=$(find "$TMP_DIR" -type f -name AdGuardHome -executable | head -n1)
 if [ -z "$ADGUARD_BIN_SRC" ]; then
-    ADGUARD_BIN_SRC=$(find "$ADGUARD_TMP_DIR" -type f -name AdGuardHome | head -n1)
+    ADGUARD_BIN_SRC=$(find "$TMP_DIR" -type f -name AdGuardHome | head -n1)
 fi
-[ -f "$ADGUARD_BIN_SRC" ] || log_error "AdGuardHome 二进制文件未找到"
+[ -f "$ADGUARD_BIN_SRC" ] || { rm -rf "$TMP_DIR"; log_error "AdGuardHome 二进制文件未找到"; }
 
-log_info "复制二进制文件到 $ADGUARD_DIR"
-mkdir -p "$(dirname "$ADGUARD_DIR")"
-cp "$ADGUARD_BIN_SRC" "$ADGUARD_DIR" || log_error "复制二进制文件失败"
-chmod +x "$ADGUARD_DIR" || log_error "设置执行权限失败"
+log_info "复制二进制文件到 $ADGUARD_BIN"
+cp "$ADGUARD_BIN_SRC" "$ADGUARD_BIN" || { rm -rf "$TMP_DIR"; log_error "复制失败"; }
+chmod +x "$ADGUARD_BIN"
 
+# 生成配置文件
 log_info "生成 AdGuardHome 配置文件"
 cat <<EOF > "package/base-files/files$ADGUARD_CONF"
 bind_host: 0.0.0.0
@@ -216,13 +226,14 @@ upstream_dns:
   - 114.114.114.114
 EOF
 
-log_info "创建 AdGuardHome 启动脚本"
-SERVICE_SCRIPT="package/base-files/files/etc/init.d/adguardhome"
-cat <<EOF > "$SERVICE_SCRIPT"
+# 生成启动脚本
+log_info "生成 AdGuardHome 启动脚本"
+cat <<EOF > "package/base-files/files/etc/init.d/adguardhome"
 #!/bin/sh /etc/rc.common
 START=95
 STOP=15
 USE_PROCD=1
+
 start_service() {
     procd_open_instance
     procd_set_param command $ADGUARD_BIN -c $ADGUARD_CONF
@@ -230,13 +241,14 @@ start_service() {
     procd_close_instance
 }
 EOF
-chmod +x "$SERVICE_SCRIPT" || log_error "设置 AdGuardHome 启动脚本权限失败"
+chmod +x "package/base-files/files/etc/init.d/adguardhome"
 
-log_info "修正 LuCI 配置，启动时识别 AdGuardHome"
+# LuCI 配置
 LUCI_CONF="package/base-files/files/etc/config/luci"
 touch "$LUCI_CONF"
 if ! grep -q "adguardhome" "$LUCI_CONF"; then
     cat <<EOF >> "$LUCI_CONF"
+
 config adguardhome 'main'
     option bin_path '$ADGUARD_BIN'
     option conf_path '$ADGUARD_CONF'
@@ -244,6 +256,7 @@ config adguardhome 'main'
 EOF
 fi
 
+rm -rf "$TMP_DIR"
 log_info "AdGuardHome 集成完成"
 
 # -------------------- 8. 集成 sirpdboy 插件 --------------------
