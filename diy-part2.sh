@@ -3,7 +3,7 @@
 set -euo pipefail
 shopt -s extglob
 
-# -------------------- 核心配置 --------------------
+# -------------------- 基础配置与变量定义 --------------------
 
 FORCE_HOSTNAME="CM520-79F"
 FORCE_IP="192.168.5.1"
@@ -14,8 +14,15 @@ ADGUARD_CONF="$ADGUARD_CONF_DIR/AdGuardHome.yaml"
 ERROR_LOG="/tmp/diy_error.log"
 
 # AdGuardHome 下载地址（armv7架构最新稳定版）
-ADGUARD_URL="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_armv7.tar.gz"
+ADGUARD_API="https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest"
 
+# DTS 相关路径和补丁
+DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
+TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
+DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
+DTS_PATCH_FILE="$DTS_DIR/cm520-79f.patch"
+
+GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
 # -------------------- 日志函数 --------------------
 
@@ -34,7 +41,7 @@ echo "开始时间: $(date)" >> "$ERROR_LOG"
 
 log_info "创建必要目录..."
 mkdir -p \
-    "target/linux/ipq40xx/dts" \
+    "$DTS_DIR" \
     "package/custom" \
     "package/base-files/files$ADGUARD_CONF_DIR" \
     "package/base-files/files/usr/bin" \
@@ -71,35 +78,52 @@ grep -q "^CONFIG_PACKAGE_nikki=y" .config || echo "CONFIG_PACKAGE_nikki=y" >> .c
 grep -q "^CONFIG_PACKAGE_luci-app-nikki=y" .config || echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
 log_info "Nikki 通过官方源集成完成"
 
-# -------------------- 4. 处理 DTS 文件（替代补丁应用） --------------------
+# -------------------- 4. 处理 DTS 补丁 --------------------
 
-log_info "处理 DTS 文件（直接下载完整 DTS 替代补丁方式）..."
+log_info "处理 DTS 补丁..."
 
-DTS_DIR="target/linux/ipq40xx/dts"
-DTS_FILE="qcom-ipq40xx-mobipromo_cm520-79f.dts"
-DTS_URL="https://raw.githubusercontent.com/mptcp/openmptcprouter/master/target/linux/ipq40xx/dts/qcom-ipq40xx-mobipromo_cm520-79f.dts"
-
-mkdir -p "$DTS_DIR"
-
-log_info "下载 DTS 文件..."
-if wget -q -O "$DTS_DIR/$DTS_FILE" "$DTS_URL"; then
-    log_info "DTS 文件下载完成: $DTS_DIR/$DTS_FILE"
-else
-    log_error "DTS 文件下载失败"
+if [ ! -f "$TARGET_DTS" ]; then
+    log_error "目标 DTS 文件不存在：$TARGET_DTS"
 fi
+
+# 备份 DTS
+BACKUP_DTS="$TARGET_DTS.backup"
+if [ ! -f "$BACKUP_DTS" ]; then
+    cp "$TARGET_DTS" "$BACKUP_DTS" || log_error "DTS 备份失败"
+    log_info "已备份 DTS 文件到 $BACKUP_DTS"
+else
+    log_info "DTS 备份文件已存在，跳过备份"
+fi
+
+# 下载补丁文件
+log_info "下载 DTS 补丁..."
+wget -q --timeout=30 --tries=3 --retry-connrefused --connect-timeout=10 -O "$DTS_PATCH_FILE" "$DTS_PATCH_URL" || log_error "DTS 补丁下载失败"
+
+if [ ! -s "$DTS_PATCH_FILE" ]; then
+    log_error "DTS 补丁文件为空或损坏"
+fi
+
+# 先进行补丁兼容检测
+if ! patch --dry-run -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE" >/dev/null 2>&1; then
+    log_error "DTS 补丁不兼容，跳过应用"
+fi
+
+# 应用补丁
+patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE" || log_error "DTS 补丁应用失败"
+
+rm -f "$DTS_PATCH_FILE"
+log_info "DTS 补丁应用完成"
 
 # -------------------- 5. 配置设备规则 --------------------
 
 log_info "配置设备规则..."
-
-GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 
 if ! grep -q "mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
 define Device/mobipromo_cm520-79f
   DEVICE_VENDOR := MobiPromo
   DEVICE_MODEL := CM520-79F
-  DEVICE_DTS := qcom-ipq40xx-mobipromo_cm520-79f
+  DEVICE_DTS := qcom-ipq4019-cm520-79f
   KERNEL_SIZE := 4096k
   ROOTFS_SIZE := 16384k
   IMAGE_SIZE := 32768k
@@ -169,10 +193,18 @@ log_info "默认IP修改完成"
 
 log_info "集成 AdGuardHome，端口：$ADGUARD_PORT"
 
+ADGUARD_DIR="package/base-files/files$ADGUARD_BIN"
 ADGUARD_TMP_DIR="/tmp/adguard"
 ADGUARD_ARCHIVE="/tmp/adguard.tar.gz"
 
 rm -rf "$ADGUARD_TMP_DIR" "$ADGUARD_ARCHIVE"
+
+# 获取 AdGuardHome 最新 armv7 版本下载地址
+log_info "获取 AdGuardHome 最新下载地址..."
+ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 $ADGUARD_API | grep "browser_download_url.*linux_armv7" | cut -d '"' -f 4)
+if [ -z "$ADGUARD_URL" ]; then
+    log_error "未找到 AdGuardHome 最新armv7下载链接"
+fi
 
 log_info "下载 AdGuardHome (armv7)..."
 wget -q -O "$ADGUARD_ARCHIVE" "$ADGUARD_URL" || log_error "AdGuardHome 下载失败"
@@ -193,8 +225,8 @@ fi
 [ -f "$ADGUARD_BIN_SRC" ] || log_error "未找到 AdGuardHome 二进制文件"
 
 log_info "复制二进制文件到 $ADGUARD_BIN"
-cp "$ADGUARD_BIN_SRC" "package/base-files/files$ADGUARD_BIN" || log_error "复制二进制失败"
-chmod +x "package/base-files/files$ADGUARD_BIN" || log_error "设置执行权限失败"
+cp "$ADGUARD_BIN_SRC" "$ADGUARD_DIR" || log_error "复制二进制失败"
+chmod +x "$ADGUARD_DIR" || log_error "设置执行权限失败"
 
 log_info "生成配置文件"
 cat <<EOF > "package/base-files/files$ADGUARD_CONF"
@@ -238,7 +270,7 @@ EOF
 fi
 log_info "AdGuardHome 集成完成"
 
-# -------------------- 9. 修补 feeds 版 firewall3 依赖问题 --------------------
+# -------------------- 9. 修补feeds版firewall3依赖 --------------------
 
 log_info "替换 luci-app-fchomo 和 luci-app-homeproxy 的 firewall3 依赖为 firewall"
 patch_firewall_dep() {
@@ -275,6 +307,6 @@ fi
 log_info "执行最终验证..."
 grep -q "$FORCE_HOSTNAME" "$HOSTNAME_FILE" || log_error "主机名文件验证失败"
 grep -q "$FORCE_IP" "$NETWORK_CONF" || log_error "IP配置文件验证失败"
-[ -f "package/base-files/files$ADGUARD_BIN" ] || log_error "AdGuardHome 二进制缺失"
+[ -f "$ADGUARD_DIR" ] || log_error "AdGuardHome 二进制缺失"
 
 log_info "DIY 脚本执行完成（所有功能已生效）"
