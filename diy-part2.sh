@@ -27,6 +27,8 @@ NIKKI_FEED="https://github.com/nikkinikki-org/OpenWrt-nikki.git;main"
 SIRPDBOY_WATCHDOG="https://github.com/sirpdboy/luci-app-watchdog.git"
 SIRPDBOY_PARTEXP="https://github.com/sirpdboy/luci-app-partexp.git"
 
+BASE_FILES="package/base-files/files"
+
 # -------------------- 日志函数 --------------------
 
 log_info() { echo -e "[$(date +'%Y-%m-%d %H:%M:%S')] [INFO] $1"; }
@@ -47,18 +49,17 @@ log_info "准备目录结构..."
 mkdir -p \
     "$DTS_DIR" \
     "package/custom" \
-    "package/base-files/files$ADGUARD_CONF_DIR" \
-    "package/base-files/files/usr/bin" \
-    "package/base-files/files/etc/uci-defaults" \
-    "package/base-files/files/etc/config" \
-    "package/base-files/files/etc/init.d"
+    "$BASE_FILES$ADGUARD_CONF_DIR" \
+    "$BASE_FILES/usr/bin" \
+    "$BASE_FILES/etc/uci-defaults" \
+    "$BASE_FILES/etc/config" \
+    "$BASE_FILES/etc/init.d"
 log_info "目录准备完成"
 
 # -------------------- 2. 内核模块配置 --------------------
 
 log_info "配置内核模块..."
 for mod in CONFIG_PACKAGE_kmod-ubi CONFIG_PACKAGE_kmod-ubifs CONFIG_PACKAGE_trx CONFIG_PACKAGE_firewall3; do
-    # 删除旧配置，避免重复
     sed -i "/^#*${mod}/d" .config 2>/dev/null || true
     echo "$mod=y" >> .config
 done
@@ -129,10 +130,10 @@ fi
 
 log_info "配置主机名和默认 IP..."
 
-HOSTNAME_FILE="package/base-files/files/etc/hostname"
+HOSTNAME_FILE="$BASE_FILES/etc/hostname"
 echo "$FORCE_HOSTNAME" > "$HOSTNAME_FILE" || log_error "写入 hostname 失败"
 
-SYSTEM_CONF="package/base-files/files/etc/config/system"
+SYSTEM_CONF="$BASE_FILES/etc/config/system"
 if [ ! -f "$SYSTEM_CONF" ]; then
     cat <<EOF > "$SYSTEM_CONF"
 config system
@@ -143,7 +144,7 @@ EOF
 fi
 sed -i "s/option hostname.*/option hostname '$FORCE_HOSTNAME'/" "$SYSTEM_CONF" || sed -i "/config system/a \    option hostname '$FORCE_HOSTNAME'" "$SYSTEM_CONF"
 
-NETWORK_CONF="package/base-files/files/etc/config/network"
+NETWORK_CONF="$BASE_FILES/etc/config/network"
 if [ ! -f "$NETWORK_CONF" ]; then
     cat <<EOF > "$NETWORK_CONF"
 config interface 'lan'
@@ -156,7 +157,7 @@ EOF
 fi
 sed -i "s/option ipaddr[[:space:]]*['\"]*[0-9.]\+['\"]*/option ipaddr '$FORCE_IP'/" "$NETWORK_CONF" || log_error "修改默认IP失败"
 
-UCI_SCRIPT="package/base-files/files/etc/uci-defaults/99-force-ip-hostname"
+UCI_SCRIPT="$BASE_FILES/etc/uci-defaults/99-force-ip-hostname"
 cat <<EOF > "$UCI_SCRIPT"
 #!/bin/sh
 uci set network.lan.ipaddr='$FORCE_IP'
@@ -173,7 +174,7 @@ log_info "默认主机名和IP配置完成"
 
 log_info "集成 AdGuardHome 二进制（防冲突模式）..."
 
-# 先从.config里移除可能启用的 adguardhome 包
+# 移除 .config 中启用的 adguardhome 包选项避免冲突
 if grep -q "^CONFIG_PACKAGE_adguardhome=y" .config 2>/dev/null; then
     log_info "检测到 .config 启用了 adguardhome 包，正在移除"
     sed -i '/^CONFIG_PACKAGE_adguardhome=y/d' .config
@@ -181,24 +182,25 @@ else
     log_info ".config 没有启用 adguardhome 包"
 fi
 
-# 清理旧文件残留，防止冲突
+# 清理旧编译残留，避免文件冲突
 log_info "清理旧编译残留，避免文件冲突"
 make clean || true
 rm -rf build_dir/target-*/* root-* || true
 
-# 创建目录
-mkdir -p "$(dirname "$ADGUARD_BIN")" "$ADGUARD_CONF_DIR" "package/base-files/files/etc/init.d" "package/base-files/files/etc/config"
+# 创建 AdGuardHome 相关目录
+mkdir -p "$BASE_FILES/usr/bin" "$BASE_FILES$ADGUARD_CONF_DIR" "$BASE_FILES/etc/init.d" "$BASE_FILES/etc/config"
 
-# 获取下载地址
-log_info "获取 AdGuardHome 最新armv7版本下载地址..."
+# 获取最新 AdGuardHome armv7 版本下载地址
+log_info "获取 AdGuardHome 最新 armv7 版本下载地址..."
 ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 "$ADGUARD_API" | grep '"browser_download_url":' | grep 'linux_armv7' | cut -d '"' -f 4)
 [ -n "$ADGUARD_URL" ] || log_error "未找到有效的 AdGuardHome 下载链接"
 
-# 下载并解压
 TMP_DIR=$(mktemp -d)
 TMP_ARCHIVE="$TMP_DIR/adguard.tar.gz"
+
 log_info "下载 AdGuardHome..."
 wget -q -O "$TMP_ARCHIVE" "$ADGUARD_URL" || { rm -rf "$TMP_DIR"; log_error "AdGuardHome 下载失败"; }
+
 log_info "解压 AdGuardHome..."
 tar -xzf "$TMP_ARCHIVE" -C "$TMP_DIR" || { rm -rf "$TMP_DIR"; log_error "解压失败"; }
 
@@ -208,13 +210,13 @@ if [ -z "$ADGUARD_BIN_SRC" ]; then
 fi
 [ -f "$ADGUARD_BIN_SRC" ] || { rm -rf "$TMP_DIR"; log_error "AdGuardHome 二进制文件未找到"; }
 
-log_info "复制二进制文件到 $ADGUARD_BIN"
-cp "$ADGUARD_BIN_SRC" "$ADGUARD_BIN" || { rm -rf "$TMP_DIR"; log_error "复制失败"; }
-chmod +x "$ADGUARD_BIN"
+log_info "复制二进制文件到 $BASE_FILES/usr/bin/AdGuardHome"
+cp "$ADGUARD_BIN_SRC" "$BASE_FILES/usr/bin/AdGuardHome" || { rm -rf "$TMP_DIR"; log_error "复制失败"; }
+chmod +x "$BASE_FILES/usr/bin/AdGuardHome"
 
 # 生成配置文件
 log_info "生成 AdGuardHome 配置文件"
-cat <<EOF > "package/base-files/files$ADGUARD_CONF"
+cat <<EOF > "$BASE_FILES$ADGUARD_CONF_DIR/AdGuardHome.yaml"
 bind_host: 0.0.0.0
 bind_port: $ADGUARD_PORT
 users:
@@ -228,7 +230,7 @@ EOF
 
 # 生成启动脚本
 log_info "生成 AdGuardHome 启动脚本"
-cat <<EOF > "package/base-files/files/etc/init.d/adguardhome"
+cat <<EOF > "$BASE_FILES/etc/init.d/adguardhome"
 #!/bin/sh /etc/rc.common
 START=95
 STOP=15
@@ -241,10 +243,10 @@ start_service() {
     procd_close_instance
 }
 EOF
-chmod +x "package/base-files/files/etc/init.d/adguardhome"
+chmod +x "$BASE_FILES/etc/init.d/adguardhome"
 
-# LuCI 配置
-LUCI_CONF="package/base-files/files/etc/config/luci"
+# LuCI 配置支持
+LUCI_CONF="$BASE_FILES/etc/config/luci"
 touch "$LUCI_CONF"
 if ! grep -q "adguardhome" "$LUCI_CONF"; then
     cat <<EOF >> "$LUCI_CONF"
