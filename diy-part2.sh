@@ -43,7 +43,7 @@ echo "===== DIY 脚本错误日志 =====" > "$ERROR_LOG"
 echo "开始时间: $(date)" >> "$ERROR_LOG"
 log_info "开始执行DIY脚本"
 
-# -------------------- 1. 准备目录 --------------------
+# ========== 1. 准备目录（成功脚本方式） ==========
 
 log_info "准备目录结构..."
 mkdir -p \
@@ -56,16 +56,16 @@ mkdir -p \
     "$BASE_FILES/etc/init.d"
 log_info "目录准备完成"
 
-# -------------------- 2. 内核模块配置 --------------------
+# ========== 2. 内核模块配置（成功脚本简化追加） ==========
 
 log_info "配置内核模块..."
-for mod in CONFIG_PACKAGE_kmod-ubi CONFIG_PACKAGE_kmod-ubifs CONFIG_PACKAGE_trx CONFIG_PACKAGE_firewall3; do
-    sed -i "/^#*${mod}/d" .config 2>/dev/null || true
-    echo "$mod=y" >> .config
-done
+echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
+echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
+echo "CONFIG_PACKAGE_trx=y" >> .config
+echo "CONFIG_PACKAGE_firewall3=y" >> .config
 log_info "内核模块配置完成"
 
-# -------------------- 3. 集成 Nikki --------------------
+# ========== 3. 集成 Nikki ==========
 
 log_info "集成 Nikki 源..."
 if ! grep -q "nikki.*$NIKKI_FEED" feeds.conf.default 2>/dev/null; then
@@ -79,7 +79,7 @@ grep -q "^CONFIG_PACKAGE_nikki=y" .config || echo "CONFIG_PACKAGE_nikki=y" >> .c
 grep -q "^CONFIG_PACKAGE_luci-app-nikki=y" .config || echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
 log_info "Nikki 集成完成"
 
-# -------------------- 4. 设备树补丁处理 --------------------
+# ========== 4. DTS补丁处理（失败脚本方式） ==========
 
 log_info "处理 DTS 补丁..."
 [ -f "$TARGET_DTS" ] || log_error "目标 DTS 文件不存在：$TARGET_DTS"
@@ -103,7 +103,7 @@ patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE" || log_error "应用 DTS 补丁失�
 rm -f "$DTS_PATCH_FILE"
 log_info "DTS 补丁应用完成"
 
-# -------------------- 5. 写入设备规则 --------------------
+# ========== 5. 写入设备规则（成功脚本方式简洁追加） ==========
 
 log_info "写入设备规则..."
 if ! grep -q "mobipromo_cm520-79f" "$GENERIC_MK"; then
@@ -126,7 +126,7 @@ else
     log_info "设备规则已存在，跳过添加"
 fi
 
-# -------------------- 6. 强制主机名和默认IP --------------------
+# ========== 6. 默认主机名和IP配置（保持失败脚本方式） ==========
 
 log_info "配置主机名和默认 IP..."
 
@@ -170,7 +170,7 @@ EOF
 chmod +x "$UCI_SCRIPT"
 log_info "默认主机名和IP配置完成"
 
-# -------------------- 7. 集成 AdGuardHome（二进制方式防冲突） --------------------
+# ========== 7. 集成 AdGuardHome 二进制（保持失败脚本方式） ==========
 
 log_info "集成 AdGuardHome 二进制（防冲突模式）..."
 
@@ -261,7 +261,7 @@ fi
 rm -rf "$TMP_DIR"
 log_info "AdGuardHome 集成完成"
 
-# -------------------- 8. 集成 sirpdboy 插件 --------------------
+# ========== 8. 集成 sirpdboy 插件（保持失败脚本方式） ==========
 
 log_info "集成 sirpdboy 插件..."
 rm -rf package/custom/luci-app-watchdog package/custom/luci-app-partexp
@@ -276,6 +276,6 @@ echo "CONFIG_PACKAGE_luci-app-watchdog=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 log_info "sirpdboy 插件集成完成"
 
-# -------------------- 9. 完成提示 --------------------
+# ========== 9. 脚本执行完成 ==========
 
 log_info "DIY脚本执行完成（所有功能均已集成且启用）"
