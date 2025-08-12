@@ -7,6 +7,7 @@
 # - REMOVED all Nikki source and package integration.
 # - REMOVED all firewall4/nftables configuration.
 # - RESTORED iptables-based firewall and AdGuardHome rules.
+# - REPLACED DTS patch and device rule sections with code from successful script.
 
 # -------------------- 日志记录函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -132,10 +133,11 @@ print_summary() {
 SCRIPT_START_TIME=$(date +%s)
 log_step "OpenWrt DIY脚本启动 - CM520-79F"
 log_info "目标设备: CM520-79F (IPQ40xx, ARMv7)"
-log_info "脚本版本: Enhanced v1.0 (日志记录 + 智能重试)"
+log_info "脚本版本: Enhanced v2.0 (整合成功脚本核心配置)"
 
 # -------------------- 基础配置与变量定义 --------------------
-WGET_OPTS="-q --timeout=30 --tries=1 --retry-connrefused --connect-timeout 10"
+# 使用成功脚本的WGET参数，允许自动重试
+WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
@@ -145,24 +147,11 @@ mkdir -p "$ADGUARD_DIR" "$DTS_DIR"
 
 # -------------------- 内核模块与工具配置 --------------------
 log_step "配置内核模块与工具"
-if grep -q "^CONFIG_PACKAGE_kmod-ubi=y" .config; then
-  log_info "kmod-ubi 已启用"
-else
-  echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
-  log_success "已启用 kmod-ubi"
-fi
-if grep -q "^CONFIG_PACKAGE_kmod-ubifs=y" .config; then
-  log_info "kmod-ubifs 已启用"
-else
-  echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
-  log_success "已启用 kmod-ubifs"
-fi
-if grep -q "^CONFIG_PACKAGE_trx=y" .config; then
-  log_info "trx 已启用"
-else
-  echo "CONFIG_PACKAGE_trx=y" >> .config
-  log_success "已启用 trx"
-fi
+# 使用成功脚本的配置，确保简单直接
+echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
+echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
+echo "CONFIG_PACKAGE_trx=y" >> .config
+log_success "已配置 kmod-ubi, kmod-ubifs, trx"
 
 # -------------------- 防止AdGuardHome包冲突 --------------------
 log_step "配置AdGuardHome相关包，防止冲突"
@@ -180,13 +169,14 @@ else
   log_success "已启用 luci-app-adguardhome"
 fi
 
-# -------------------- DTS补丁处理 (保持原封不动) --------------------
-log_step "处理DTS补丁 (保持原有逻辑)"
+# -------------------- DTS补丁处理 (使用成功脚本代码) --------------------
+log_step "处理DTS补丁"
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
 DTS_PATCH_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts.patch"
 TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
+
 log_info "下载DTS补丁..."
-if retry_download "$DTS_PATCH_URL" "$DTS_PATCH_FILE"; then
+if wget $WGET_OPTS -O "$DTS_PATCH_FILE" "$DTS_PATCH_URL"; then
   log_success "DTS补丁下载完成"
   if [ ! -f "$TARGET_DTS" ]; then
     log_info "应用DTS补丁..."
@@ -202,13 +192,12 @@ else
   log_error "DTS补丁下载失败"
 fi
 
-# -------------------- 设备规则配置 --------------------
+# -------------------- 设备规则配置 (使用成功脚本代码) --------------------
 log_step "配置设备规则"
-if grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
-  log_info "CM520-79F设备规则已存在"
-else
+if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
   log_info "添加CM520-79F设备规则..."
   cat <<'EOF' >>"$GENERIC_MK"
+
 define Device/mobipromo_cm520-79f
   DEVICE_VENDOR := MobiPromo
   DEVICE_MODEL := CM520-79F
@@ -221,6 +210,8 @@ endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
   log_success "CM520-79F设备规则添加成功"
+else
+  log_info "CM520-79F设备规则已存在"
 fi
 
 # -------------------- 集成AdGuardHome核心 --------------------
