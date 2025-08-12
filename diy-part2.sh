@@ -1,8 +1,9 @@
 #!/bin/bash
-File name: diy-part2.sh
-Description: OpenWrt DIY script part 2 (After Update feeds)
-Target: CM520-79F (IPQ40xx, ARMv7)
-Enhanced: 轻量级日志记录 + 智能重试
+# File name: diy-part2.sh
+# Description: OpenWrt DIY script part 2 (After Update feeds)
+# Target: CM520-79F (IPQ40xx, ARMv7)
+# Enhanced: 轻量级日志记录 + 智能重试
+# -------------------- 日志记录函数 --------------------
 
 -------------------- 日志记录函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $\033[0m"; }
