@@ -3,6 +3,10 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 # Target: CM520-79F (IPQ40xx, ARMv7)
 # Enhanced: 轻量级日志记录 + 智能重试
+# Modifications:
+# - REMOVED all Nikki source and package integration.
+# - REMOVED all firewall4/nftables configuration.
+# - RESTORED iptables-based firewall and AdGuardHome rules.
 
 # -------------------- 日志记录函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -108,14 +112,13 @@ print_summary() {
   log_info "总耗时: ${minutes}分${seconds}秒"
   echo ""
   echo "已完成配置："
-  echo "1. ✅ 集成Nikki源"
-  echo "2. ✅ 下载并配置AdGuardHome核心"
-  echo "3. ✅ 配置LuCI识别和初始化YAML"
-  echo "4. ✅ 禁用dnsmasq DNS，保留DHCP"
-  echo "5. ✅ 配置firewall4/nftables适配"
-  echo "6. ✅ 设置开机自启和权限"
-  echo "7. ✅ 防止包冲突"
-  echo "8. ✅ 保持DTS补丁原封不动"
+  echo "1. ✅ 下载并配置AdGuardHome核心"
+  echo "2. ✅ 配置LuCI识别和初始化YAML"
+  echo "3. ✅ 禁用dnsmasq DNS，保留DHCP"
+  echo "4. ✅ 配置iptables适配"
+  echo "5. ✅ 设置开机自启和权限"
+  echo "6. ✅ 防止包冲突"
+  echo "7. ✅ 保持DTS补丁原封不动"
   echo "========================================"
   # 执行最终检查
   if check_critical_files; then
@@ -137,8 +140,6 @@ ARCH="armv7"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
-# Nikki 源配置
-NIKKI_FEED="https://github.com/nikkinikki-org/OpenWrt-nikki.git;main"
 log_info "创建必要的目录结构"
 mkdir -p "$ADGUARD_DIR" "$DTS_DIR"
 
@@ -178,44 +179,6 @@ else
   echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
   log_success "已启用 luci-app-adguardhome"
 fi
-
-# -------------------- 集成 Nikki 源 --------------------
-log_step "集成 Nikki 源"
-# 检查是否已经添加了Nikki源
-if grep -q "nikki.*$NIKKI_FEED" feeds.conf.default 2>/dev/null; then
-  log_info "Nikki 源已存在，跳过添加"
-else
-  echo "src-git nikki $NIKKI_FEED" >> feeds.conf.default
-  log_success "已添加 Nikki 源到 feeds.conf.default"
-fi
-# 更新Nikki源
-log_info "更新 Nikki 源..."
-if retry_command "./scripts/feeds update nikki"; then
-  log_success "Nikki 源更新成功"
-else
-  log_warn "Nikki 源更新失败，但继续执行"
-fi
-# 安装Nikki包
-log_info "安装 Nikki 包..."
-if retry_command "./scripts/feeds install -a -p nikki"; then
-  log_success "Nikki 包安装成功"
-else
-  log_warn "Nikki 包安装失败，但继续执行"
-fi
-# 启用Nikki包
-if grep -q "^CONFIG_PACKAGE_nikki=y" .config; then
-  log_info "nikki 包已启用"
-else
-  echo "CONFIG_PACKAGE_nikki=y" >> .config
-  log_success "已启用 nikki 包"
-fi
-if grep -q "^CONFIG_PACKAGE_luci-app-nikki=y" .config; then
-  log_info "luci-app-nikki 已启用"
-else
-  echo "CONFIG_PACKAGE_luci-app-nikki=y" >> .config
-  log_success "已启用 luci-app-nikki"
-fi
-log_success "Nikki 集成完成"
 
 # -------------------- DTS补丁处理 (保持原封不动) --------------------
 log_step "处理DTS补丁 (保持原有逻辑)"
@@ -376,7 +339,6 @@ dns:
   cache_ttl_min: 0
   cache_ttl_max: 0
   cache_optimistic: false
-  bogus_nxdomain: []
   aaaa_disabled: false
   enable_dnssec: false
   edns_client_subnet:
@@ -475,8 +437,7 @@ reload_service() {
 }
 EOF
 chmod +x "package/base-files/files/etc/init.d/adguardhome"
-log_success "AdGuardHome初始化服务脚本创建完成"
-log_success "AdGuardHome LuCI识别配置完成"
+log_success "AdGuardHome UCI识别配置完成"
 
 # -------------------- dnsmasq 配置 (禁用 DNS 功能，保留 DHCP) --------------------
 log_step "配置dnsmasq (禁用DNS，保留DHCP)"
@@ -525,56 +486,26 @@ config odhcpd 'main'
 EOF
 log_success "dnsmasq配置完成 (DNS功能已禁用，DHCP功能保留)"
 
-# -------------------- firewall4/nftables 适配 --------------------
-log_step "配置firewall4/nftables适配"
-# 创建自定义nftables规则文件
-mkdir -p "package/base-files/files/etc/nftables.d"
-cat >"package/base-files/files/etc/nftables.d/adguardhome.nft" <<EOF
-# AdGuardHome DNS redirect rules
-table inet adguardhome {
-  chain dnat_dns {
-    type nat hook prerouting priority dstnat; policy accept;
-    # LAN DNS redirect
-    iifname "br-lan" tcp dport 53 dnat to 127.0.0.1:5353 comment "AdGuardHome TCP DNS redirect"
-    iifname "br-lan" udp dport 53 dnat to 127.0.0.1:5353 comment "AdGuardHome UDP DNS redirect"
-    # WAN DNS redirect (optional, for router itself)
-    iifname != "br-lan" ip saddr != 127.0.0.0/8 tcp dport 53 dnat to 127.0.0.1:5353 comment "AdGuardHome WAN TCP DNS redirect"
-    iifname != "br-lan" ip saddr != 127.0.0.0/8 udp dport 53 dnat to 127.0.0.1:5353 comment "AdGuardHome WAN UDP DNS redirect"
-  }
-  chain accept_adguard {
-    type filter hook input priority 0; policy accept;
-    # Allow AdGuardHome web interface
-    tcp dport 3000 accept comment "AdGuardHome Web Interface"
-    # Allow AdGuardHome DNS
-    tcp dport 5353 accept comment "AdGuardHome DNS TCP"
-    udp dport 5353 accept comment "AdGuardHome DNS UDP"
-  }
-}
-EOF
-log_success "nftables规则文件创建完成"
-# 创建 firewall.user 文件 (作为备用方案)
-cat >"package/base-files/files/etc/firewall.user" <<EOF
+# -------------------- iptables 适配 --------------------
+log_step "配置iptables适配"
+# 创建 firewall.user 文件
+cat >"package/base-files/files/etc/firewall.user" <<'EOF'
 #!/bin/sh
-# AdGuardHome firewall rules
-# Load AdGuardHome nftables rules
-if [ -f /etc/nftables.d/adguardhome.nft ]; then
-  nft -f /etc/nftables.d/adguardhome.nft 2>/dev/null
-fi
-# Fallback rules if nftables config doesn't work
-nft add table inet fw4 2>/dev/null || true
-nft add chain inet fw4 dstnat '{ type nat hook prerouting priority dstnat; }' 2>/dev/null || true
-nft add chain inet fw4 input_lan '{ type filter hook input priority filter; }' 2>/dev/null || true
-# DNS redirect rules
-nft add rule inet fw4 dstnat iifname "br-lan" tcp dport 53 dnat to 127.0.0.1:5353 comment "AdGuardHome TCP" 2>/dev/null || true
-nft add rule inet fw4 dstnat iifname "br-lan" udp dport 53 dnat to 127.0.0.1:5353 comment "AdGuardHome UDP" 2>/dev/null || true
-# Accept rules
-nft add rule inet fw4 input_lan tcp dport 3000 accept comment "AdGuardHome Web" 2>/dev/null || true
-nft add rule inet fw4 input_lan tcp dport 5353 accept comment "AdGuardHome DNS TCP" 2>/dev/null || true
-nft add rule inet fw4 input_lan udp dport 5353 accept comment "AdGuardHome DNS UDP" 2>/dev/null || true
+# AdGuardHome firewall rules using iptables
+# Flush old rules to prevent conflicts
+iptables -t nat -F PREROUTING
+
+# Redirect LAN DNS (port 53) to AdGuardHome (port 5353)
+iptables -t nat -A PREROUTING -i br-lan -p udp --dport 53 -j DNAT --to 127.0.0.1:5353
+iptables -t nat -A PREROUTING -i br-lan -p tcp --dport 53 -j DNAT --to 127.0.0.1:5353
+
+# Accept AdGuardHome traffic
+iptables -I INPUT -p tcp --dport 3000 -j ACCEPT
+iptables -I INPUT -p tcp --dport 5353 -j ACCEPT
+iptables -I INPUT -p udp --dport 5353 -j ACCEPT
 EOF
 chmod +x "package/base-files/files/etc/firewall.user"
-log_success "firewall.user备用脚本创建完成"
-log_success "firewall4/nftables适配配置完成"
+log_success "iptables规则文件创建完成"
 
 # -------------------- 系统配置优化 --------------------
 log_step "配置系统优化"
@@ -592,8 +523,8 @@ start() {
   # 确保工作目录权限正确
   mkdir -p /etc/AdGuardHome
   chmod 755 /etc/AdGuardHome
-  # 应用nftables规则
-  [ -f /etc/nftables.d/adguardhome.nft ] && nft -f /etc/nftables.d/adguardhome.nft 2>/dev/null || true
+  # 应用iptables规则
+  [ -x /etc/firewall.user ] && /etc/firewall.user
 }
 EOF
 chmod +x "package/base-files/files/etc/init.d/adguard-optimize"
@@ -646,13 +577,11 @@ log_success "sirpdboy插件集成完成"
 
 # -------------------- 最终检查和配置清理 --------------------
 log_step "执行最终配置检查和清理"
-# 确保firewall4相关包启用
-log_info "配置firewall4相关包..."
+# 确保iptables和firewall相关包启用
+log_info "配置iptables和firewall相关包..."
 packages_to_enable=(
-  "CONFIG_PACKAGE_firewall4=y"
-  "CONFIG_PACKAGE_nftables=y"
-  "CONFIG_PACKAGE_kmod-nft-core=y"
-  "CONFIG_PACKAGE_kmod-nft-nat=y"
+  "CONFIG_PACKAGE_firewall=y"
+  "CONFIG_PACKAGE_iptables=y"
 )
 for package in "${packages_to_enable[@]}"; do
   package_name=$(echo "$package" | cut -d'=' -f1)
@@ -666,8 +595,7 @@ done
 # 禁用可能冲突的防火墙
 log_info "禁用可能冲突的防火墙包..."
 packages_to_disable=(
-  "CONFIG_PACKAGE_iptables=n"
-  "CONFIG_PACKAGE_firewall=n"
+  "CONFIG_PACKAGE_firewall4=n"
 )
 for package in "${packages_to_disable[@]}"; do
   package_name=$(echo "$package" | cut -d'=' -f1)
