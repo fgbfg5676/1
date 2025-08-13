@@ -3,13 +3,15 @@
 # Description: OpenWrt DIY script part 2 for CM520-79F (IPQ40xx, ARMv7) - 云编译优化版
 # Enhanced: 适配 Opboot 的 UBI 格式, 支持 Lean 源码, 可选 AdGuardHome, 60-80MB 固件
 # Modifications:
-# - 保留设备规则（KERNEL_SIZE=4096k, ROOTFS_SIZE=16384k, IMAGE_SIZE=32768k），禁用 check-size
+# - 修复命令执行异常（替换 eval 为 sh -c）
+# - 增强 scripts/feeds 权限检查与修复
+# - 解决AdGuardHome下载源变量定义问题
+# - 保留设备规则（KERNEL_SIZE=4096k, ROOTFS_SIZE=16384k, IMAGE_SIZE=32768k）
 # - 强制使用 DTS 补丁（a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch）
-# - 验证内核模块（kmod-ubi, kmod-ubifs, trx, kmod-ath10k-ct, ipq-wifi-mobipromo_cm520-79f）
+# - 验证内核模块（kmod-ubi, kmod-ubifs, trx, kmod-ath10k-ct 等）
 # - 优化 AdGuardHome 配置，降低内存占用
 # - 增强云编译环境检查和下载稳定性（多源下载、智能重试）
-# - 完整包含用户提供的代码（基础配置、内核模块、DTS补丁、设备规则）
-# Date: August 13, 2025
+# Date: August 14, 2025
 
 # -------------------- 云编译环境检测 --------------------
 detect_cloud_env() {
@@ -42,7 +44,8 @@ retry_command() {
   local cmd="$*"
   while [ $attempt -le $max_attempts ]; do
     log_info "执行命令 (尝试 $attempt/$max_attempts): $cmd"
-    if timeout 900 eval "$cmd"; then  # 延长超时到15分钟
+    # 修复：用 sh -c 替代 eval，避免命令解析异常
+    if timeout 900 sh -c "$cmd"; then
       [ $attempt -gt 1 ] && log_success "命令在第 $attempt 次尝试后成功执行"
       return 0
     else
@@ -143,6 +146,12 @@ check_cloud_build_env() {
       log_error "关键文件缺失: $file (请确保脚本在 OpenWrt 源码根目录运行)"
     fi
   done
+  
+  # 新增：检查并修复 scripts/feeds 权限
+  if [ -f "scripts/feeds" ] && [ ! -x "scripts/feeds" ]; then
+    log_warn "scripts/feeds 缺少可执行权限，正在修复..."
+    chmod +x "scripts/feeds" || log_error "修复scripts/feeds权限失败"
+  fi
   
   for dir in "${critical_dirs[@]}"; do
     if [ ! -d "$dir" ]; then
@@ -312,7 +321,7 @@ exec 1> >(tee -a "$LOG_FILE") 2>&1  # 同时捕获stdout和stderr
 
 log_step "OpenWrt DIY脚本启动 - CM520-79F (云编译优化版)"
 log_info "目标设备: CM520-79F (IPQ40xx, ARMv7)"
-log_info "脚本版本: Cloud Enhanced v2.20 (增强下载稳定性, 多源支持)"
+log_info "脚本版本: Cloud Enhanced v2.21 (修复命令执行和权限问题)"
 log_info "日志保存到: $LOG_FILE"
 
 # 检查云编译环境
@@ -354,7 +363,6 @@ else
 fi
 
 # -------------------- 基础配置与变量定义 --------------------
-# 用户提供的代码（完整保留）
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
@@ -369,7 +377,6 @@ safe_mkdir "$DTS_DIR"
 safe_chmod "$DTS_DIR" "u+w"
 
 # -------------------- 内核模块与工具配置 --------------------
-# 用户提供的代码（完整保留）
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 echo "CONFIG_PACKAGE_trx=y" >> .config
@@ -410,7 +417,6 @@ done
 log_success "内核模块和插件验证完成"
 
 # -------------------- DTS补丁处理 --------------------
-# 用户提供的代码（完整保留并增强）
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
 DTS_PATCH_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts.patch"
 TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
@@ -490,7 +496,6 @@ else
 fi
 
 # -------------------- 设备规则配置 --------------------
-# 用户提供的代码（完整保留）
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     echo "Adding CM520-79F device rule..."
     cat <<EOF >> "$GENERIC_MK"
@@ -565,8 +570,8 @@ if [ "$ENABLE_ADGUARD" = "y" ]; then
       cut -d '"' -f 4 | head -1)
   fi
   
-  # 构建完整的下载源列表
-  local adguard_download_urls=()
+  # 构建完整的下载源列表（修复变量定义问题）
+  adguard_download_urls=()
   if [ -n "$ADGUARD_URL" ]; then
     adguard_download_urls+=("$ADGUARD_URL")
   fi
