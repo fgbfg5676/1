@@ -4,12 +4,10 @@
 # Target: CM520-79F (IPQ40xx, ARMv7)
 # Enhanced: 轻量级日志记录 + 智能重试 + 出错立即停止
 # Modifications:
-# - REMOVED all Nikki source and package integration.
-# - REMOVED all firewall4/nftables configuration.
-# - REMOVED OpenClash and luci-app-watchdog integration.
 # - RESTORED iptables-based firewall and AdGuardHome rules.
 # - REPLACED DTS patch and device rule sections with code from successful script.
 # - ADDED immediate exit on critical failures.
+# - MODIFIED DTS patch logic to always replace existing DTS file.
 
 # -------------------- 日志记录函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -133,7 +131,6 @@ log_info "目标设备: CM520-79F (IPQ40xx, ARMv7)"
 log_info "脚本版本: Enhanced v2.2 (移除OpenClash和watchdog，整合成功脚本核心配置，出错立即停止)"
 
 # -------------------- 基础配置与变量定义 --------------------
-# 引用成功版本，移除OpenClash
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
 ARCH="armv7"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
@@ -144,7 +141,6 @@ log_info "创建必要的目录结构"
 mkdir -p "$ADGUARD_DIR" "$DTS_DIR" || log_error "创建目录结构失败"
 
 # -------------------- 内核模块与工具配置 --------------------
-# 引用成功版本
 log_step "配置内核模块与工具"
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config || log_error "配置 kmod-ubi 失败"
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config || log_error "配置 kmod-ubifs 失败"
@@ -166,7 +162,6 @@ else
 fi
 
 # -------------------- DTS补丁处理 --------------------
-# 引用成功版本
 log_step "处理DTS补丁"
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
 DTS_PATCH_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts.patch"
@@ -175,22 +170,21 @@ TARGET_DTS="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 log_info "下载DTS补丁..."
 if retry_download "$DTS_PATCH_URL" "$DTS_PATCH_FILE"; then
   log_success "DTS补丁下载完成"
-  if [ ! -f "$TARGET_DTS" ]; then
-    log_info "应用DTS补丁..."
-    if patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE"; then
-      log_success "DTS补丁应用成功"
-    else
-      log_error "DTS补丁应用失败"
-    fi
+  log_info "应用DTS补丁以替换旧DTS文件..."
+  if [ -f "$TARGET_DTS" ]; then
+    log_info "删除现有DTS文件: $TARGET_DTS"
+    rm -f "$TARGET_DTS" || log_error "删除旧DTS文件失败"
+  fi
+  if patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE"; then
+    log_success "DTS补丁应用成功，生成新DTS文件: $TARGET_DTS"
   else
-    log_info "DTS文件已存在，跳过补丁应用"
+    log_error "DTS补丁应用失败"
   fi
 else
   log_error "DTS补丁下载失败"
 fi
 
 # -------------------- 设备规则配置 --------------------
-# 引用成功版本
 log_step "配置设备规则"
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
   log_info "添加CM520-79F设备规则..."
@@ -486,7 +480,7 @@ cat >"package/base-files/files/etc/init.d/adguard-optimize" <<'EOF' || log_error
 START=99
 start() {
   echo 'nameserver 127.0.0.1' > /tmp/resolv.conf
-  echo 'nameserver 223.5.5.5' >> /tmp/resolv.conf
+  echo 'nameserver 223.5.5.5' > /tmp/resolv.conf
   chmod +x /usr/bin/AdGuardHome 2>/dev/null || true
   mkdir -p /etc/AdGuardHome
   chmod 755 /etc/AdGuardHome
