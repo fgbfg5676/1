@@ -9,7 +9,8 @@
 # - ADDED immediate exit on critical failures.
 # - MODIFIED DTS patch logic to apply patch on existing DTS file without deletion.
 # - FIXED 'local' variable error in AdGuardHome core copy step.
-# - ADDED validation for DTS patch application and fallback mechanism.
+# - FIXED syntax error in dnsmasq configuration (unexpected EOF).
+# - ADDED validation for configuration file creation.
 
 # -------------------- 日志记录函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -93,6 +94,24 @@ check_critical_files() {
   else
     log_error "AdGuardHome配置文件未找到"
   fi
+  # 检查dnsmasq配置文件
+  if [ -f "package/base-files/files/etc/config/dhcp" ]; then
+    log_success "dnsmasq配置文件已创建"
+  else
+    log_error "dnsmasq配置文件未找到"
+  fi
+  # 检查iptables规则文件
+  if [ -f "package/base-files/files/etc/firewall.user" ]; then
+    log_success "iptables规则文件已创建"
+  else
+    log_error "iptables规则文件未找到"
+  fi
+  # 检查系统优化脚本
+  if [ -f "package/base-files/files/etc/init.d/adguard-optimize" ]; then
+    log_success "系统优化脚本已创建"
+  else
+    log_error "系统优化脚本未找到"
+  fi
   return $errors
 }
 
@@ -131,7 +150,15 @@ print_summary() {
 SCRIPT_START_TIME=$(date +%s)
 log_step "OpenWrt DIY脚本启动 - CM520-79F"
 log_info "目标设备: CM520-79F (IPQ40xx, ARMv7)"
-log_info "脚本版本: Enhanced v2.4 (应用DTS补丁到现有文件，修复AdGuardHome复制错误)"
+log_info "脚本版本: Enhanced v2.6 (修复语法错误，应用DTS补丁到现有文件，增强文件检查)"
+
+# 验证脚本语法
+log_info "验证脚本语法..."
+if bash -n "$0"; then
+  log_success "脚本语法检查通过"
+else
+  log_error "脚本语法检查失败，请检查脚本内容"
+fi
 
 # -------------------- 基础配置与变量定义 --------------------
 WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout 10"
@@ -206,7 +233,12 @@ if retry_download "$DTS_PATCH_URL" "$DTS_PATCH_FILE"; then
   fi
   log_info "应用DTS补丁到现有DTS文件..."
   log_info "执行补丁命令: patch -d $DTS_DIR -p2 < $DTS_PATCH_FILE"
-  if patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE"; then
+  # 备份现有DTS文件
+  if [ -f "$TARGET_DTS" ]; then
+    cp "$TARGET_DTS" "$TARGET_DTS.bak" || log_error "备份DTS文件失败"
+    log_info "已备份DTS文件: $TARGET_DTS.bak"
+  fi
+  if patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE" --verbose 2>&1 | tee /tmp/patch.log; then
     log_success "DTS补丁应用成功"
     # 验证DTS文件是否存在
     if [ -f "$TARGET_DTS" ]; then
@@ -216,9 +248,11 @@ if retry_download "$DTS_PATCH_URL" "$DTS_PATCH_FILE"; then
       log_error "DTS补丁应用后未生成文件: $TARGET_DTS"
     fi
   else
+    log_warn "补丁应用失败 (p2)，查看 /tmp/patch.log 获取详细信息"
+    cat /tmp/patch.log
     # 尝试使用 -p1
-    log_warn "补丁应用失败 (p2)，尝试使用 -p1..."
-    if patch -d "$DTS_DIR" -p1 < "$DTS_PATCH_FILE"; then
+    log_info "尝试使用 -p1 应用补丁: patch -d $DTS_DIR -p1 < $DTS_PATCH_FILE"
+    if patch -d "$DTS_DIR" -p1 < "$DTS_PATCH_FILE" --verbose 2>&1 | tee /tmp/patch.log; then
       log_success "DTS补丁应用成功 (使用 -p1)"
       if [ -f "$TARGET_DTS" ]; then
         DTS_SIZE=$(stat -f%z "$TARGET_DTS" 2>/dev/null || stat -c%s "$TARGET_DTS" 2>/dev/null || echo "0")
@@ -227,7 +261,8 @@ if retry_download "$DTS_PATCH_URL" "$DTS_PATCH_FILE"; then
         log_error "DTS补丁应用后未生成文件: $TARGET_DTS"
       fi
     else
-      log_error "DTS补丁应用失败 (p1 和 p2 均失败)"
+      log_error "DTS补丁应用失败 (p1 和 p2 均失败)，查看 /tmp/patch.log 获取详细信息"
+      cat /tmp/patch.log
     fi
   fi
 else
@@ -303,14 +338,19 @@ config adguardhome 'main'
   option verbose '0'
   option update '1'
 EOF
-log_success "AdGuardHome UCI配置文件创建完成"
+if [ -f "package/base-files/files/etc/config/adguardhome" ]; then
+  log_success "AdGuardHome UCI配置文件创建完成"
+else
+  log_error "AdGuardHome UCI配置文件创建失败"
+fi
+
 mkdir -p "package/base-files/files/etc/AdGuardHome" || log_error "创建AdGuardHome工作目录失败"
 cat >"package/base-files/files/etc/AdGuardHome/AdGuardHome.yaml" <<EOF || log_error "创建AdGuardHome YAML配置失败"
 bind_host: 0.0.0.0
 bind_port: 3000
 users:
-- name: admin
-  password: \$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J/6z8s8nJlQ6oP4y
+  - name: admin
+    password: \$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J/6z8s8nJlQ6oP4y
 auth_attempts: 5
 block_auth_min: 15
 http_proxy: ""
@@ -320,7 +360,7 @@ debug_pprof: false
 web_session_ttl: 720
 dns:
   bind_hosts:
-  - 0.0.0.0
+    - 0.0.0.0
   port: 5353
   statistics_interval: 90
   querylog_enabled: true
@@ -334,31 +374,31 @@ dns:
   blocking_ipv6: ""
   blocked_response_ttl: 10
   parental_block_host: family-block.dns.adguard.com
-  safeBrowse_block_host: standard-block.dns.adguard.com
+  safebrowse_block_host: standard-block.dns.adguard.com
   ratelimit: 20
   ratelimit_whitelist: []
   refuse_any: true
   upstream_dns:
-  - 223.5.5.5
-  - 119.29.29.29
-  - tls://dns.alidns.com
-  - tls://doh.pub
+    - 223.5.5.5
+    - 119.29.29.29
+    - tls://dns.alidns.com
+    - tls://doh.pub
   upstream_dns_file: ""
   bootstrap_dns:
-  - 223.5.5.5:53
-  - 119.29.29.29:53
+    - 223.5.5.5:53
+    - 119.29.29.29:53
   all_servers: false
   fastest_addr: false
   fastest_timeout: 1s
   allowed_clients: []
   disallowed_clients: []
   blocked_hosts:
-  - version.bind
-  - id.server
-  - hostname.bind
+    - version.bind
+    - id.server
+    - hostname.bind
   trusted_proxies:
-  - 127.0.0.0/8
-  - ::1/128
+    - 127.0.0.0/8
+    - ::1/128
   cache_size: 4194304
   cache_ttl_min: 0
   cache_ttl_max: 0
@@ -378,7 +418,7 @@ filtering:
   filtering_enabled: true
   blocking_mode: default
   parental_enabled: false
-  safeBrowse_enabled: false
+  safebrowse_enabled: false
   safesearch_enabled: false
   safesearch_cache_size: 1048576
   safesearch_cache_ttl: 1800
@@ -416,7 +456,12 @@ os:
   rlimit_nofile: 0
 schema_version: 17
 EOF
-log_success "AdGuardHome初始化YAML配置创建完成"
+if [ -f "package/base-files/files/etc/AdGuardHome/AdGuardHome.yaml" ]; then
+  log_success "AdGuardHome初始化YAML配置创建完成"
+else
+  log_error "AdGuardHome初始化YAML配置创建失败"
+fi
+
 mkdir -p "package/base-files/files/etc/init.d" || log_error "创建init.d目录失败"
 cat >"package/base-files/files/etc/init.d/adguardhome" <<'EOF' || log_error "创建AdGuardHome服务脚本失败"
 #!/bin/sh /etc/rc.common
@@ -457,8 +502,163 @@ reload_service() {
   start
 }
 EOF
-chmod +x "package/base-files/files/etc/init.d/adguardhome" || log_error "设置AdGuardHome服务脚本权限失败"
-log_success "AdGuardHome UCI识别配置完成"
+if [ -f "package/base-files/files/etc/init.d/adguardhome" ]; then
+  chmod +x "package/base-files/files/etc/init.d/adguardhome" || log_error "设置AdGuardHome服务脚本权限失败"
+  log_success "AdGuardHome UCI识别配置完成"
+else
+  log_error "AdGuardHome服务脚本创建失败"
+fi
 
 # -------------------- dnsmasq 配置 (禁用 DNS 功能，保留 DHCP) --------------------
-log_step "配置dnsmasq (禁用DNS，
+log_step "配置dnsmasq (禁用DNS，保留DHCP)"
+mkdir -p "package/base-files/files/etc/config" || log_error "创建dhcp配置目录失败"
+cat >"package/base-files/files/etc/config/dhcp" <<'EOF' || log_error "创建dnsmasq配置文件失败"
+config dnsmasq 'main'
+  option domainneeded '1'
+  option boguspriv '1'
+  option filterwin2k '0'
+  option localise_queries '1'
+  option rebind_protection '1'
+  option rebind_localhost '1'
+  option local '/lan/'
+  option domain 'lan'
+  option expandhosts '1'
+  option authoritative '1'
+  option readethers '1'
+  option leasefile '/tmp/dhcp.leases'
+  option resolvfile '/tmp/resolv.conf.d/resolv.conf.auto'
+  option nonwildcard '1'
+  option localservice '1'
+  option noresolv '1'
+  option port '0'
+  list server '127.0.0.1#5353'
+
+config dhcp 'lan'
+  option interface 'lan'
+  option start '100'
+  option limit '150'
+  option leasetime '12h'
+  option dhcpv4 'server'
+  option dhcpv6 'server'
+  option ra 'server'
+  option ra_management '1'
+  list dns '192.168.1.1'
+
+config dhcp 'wan'
+  option interface 'wan'
+  option ignore '1'
+
+config odhcpd 'main'
+  option maindhcp '0'
+  option leasefile '/tmp/hosts/odhcpd'
+  option leasetrigger '/usr/sbin/odhcpd-update'
+  option loglevel '4'
+EOF
+if [ -f "package/base-files/files/etc/config/dhcp" ]; then
+  log_success "dnsmasq配置完成 (DNS功能已禁用，DHCP功能保留)"
+else
+  log_error "dnsmasq配置文件创建失败"
+fi
+
+# -------------------- iptables 适配 --------------------
+log_step "配置iptables适配"
+cat >"package/base-files/files/etc/firewall.user" <<'EOF' || log_error "创建iptables规则文件失败"
+#!/bin/sh
+# AdGuardHome firewall rules using iptables
+iptables -t nat -F PREROUTING
+iptables -t nat -A PREROUTING -i br-lan -p udp --dport 53 -j DNAT --to 127.0.0.1:5353
+iptables -t nat -A PREROUTING -i br-lan -p tcp --dport 53 -j DNAT --to 127.0.0.1:5353
+iptables -I INPUT -p tcp --dport 3000 -j ACCEPT
+iptables -I INPUT -p tcp --dport 5353 -j ACCEPT
+iptables -I INPUT -p udp --dport 5353 -j ACCEPT
+EOF
+if [ -f "package/base-files/files/etc/firewall.user" ]; then
+  chmod +x "package/base-files/files/etc/firewall.user" || log_error "设置iptables规则文件权限失败"
+  log_success "iptables规则文件创建完成"
+else
+  log_error "iptables规则文件创建失败"
+fi
+
+# -------------------- 系统配置优化 --------------------
+log_step "配置系统优化"
+mkdir -p "package/base-files/files/etc/init.d" || log_error "创建系统优化init.d目录失败"
+cat >"package/base-files/files/etc/init.d/adguard-optimize" <<'EOF' || log_error "创建系统优化脚本失败"
+#!/bin/sh /etc/rc.common
+START=99
+start() {
+  echo 'nameserver 127.0.0.1' > /tmp/resolv.conf
+  echo 'nameserver 223.5.5.5' > /tmp/resolv.conf
+  chmod +x /usr/bin/AdGuardHome 2>/dev/null || true
+  mkdir -p /etc/AdGuardHome
+  chmod 755 /etc/AdGuardHome
+  [ -x /etc/firewall.user ] && /etc/firewall.user
+}
+EOF
+if [ -f "package/base-files/files/etc/init.d/adguard-optimize" ]; then
+  chmod +x "package/base-files/files/etc/init.d/adguard-optimize" || log_error "设置系统优化脚本权限失败"
+  log_success "系统优化脚本创建完成"
+  log_success "系统优化配置完成"
+else
+  log_error "系统优化脚本创建失败"
+fi
+
+# -------------------- 插件集成 --------------------
+log_step "集成sirpdboy插件"
+mkdir -p package/custom || log_error "创建插件目录失败"
+rm -rf package/custom/luci-app-partexp || log_info "清理旧插件失败（非致命）"
+log_info "克隆luci-app-partexp插件..."
+if retry_command "git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git package/custom/luci-app-partexp"; then
+  log_success "luci-app-partexp插件克隆成功"
+else
+  log_error "luci-app-partexp插件克隆失败"
+fi
+log_info "更新所有feeds..."
+if retry_command "./scripts/feeds update -a"; then
+  log_success "feeds更新成功"
+else
+  log_error "feeds更新失败"
+fi
+log_info "安装所有feeds..."
+if retry_command "./scripts/feeds install -a"; then
+  log_success "feeds安装成功"
+else
+  log_error "feeds安装失败"
+fi
+if grep -q "^CONFIG_PACKAGE_luci-app-partexp=y" .config; then
+  log_info "luci-app-partexp 已启用"
+else
+  echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config || log_error "启用 luci-app-partexp 失败"
+  log_success "已启用 luci-app-partexp"
+fi
+log_success "sirpdboy插件集成完成"
+
+# -------------------- 最终检查和配置清理 --------------------
+log_step "执行最终配置检查和清理"
+log_info "配置iptables和firewall相关包..."
+packages_to_enable=(
+  "CONFIG_PACKAGE_firewall=y"
+  "CONFIG_PACKAGE_iptables=y"
+)
+for package in "${packages_to_enable[@]}"; do
+  package_name=$(echo "$package" | cut -d'=' -f1)
+  if grep -q "^${package}" .config; then
+    log_info "${package_name} 已启用"
+  else
+    echo "$package" >> .config || log_error "启用 ${package_name} 失败"
+    log_success "已启用 ${package_name}"
+  fi
+done
+log_info "禁用可能冲突的防火墙包..."
+packages_to_disable=(
+  "CONFIG_PACKAGE_firewall4=n"
+)
+for package in "${packages_to_disable[@]}"; do
+  package_name=$(echo "$package" | cut -d'=' -f1)
+  sed -i "/^${package_name}=y/d" .config || log_error "清理 ${package_name} 配置失败"
+  echo "$package" >> .config || log_error "禁用 ${package_name} 失败"
+  log_success "已禁用 ${package_name}"
+done
+log_success "配置检查和清理完成"
+
+# -------------------- 最终检查和脚本摘要 --------------------
+print_summary "$SCRIPT_START_TIME"
