@@ -3,11 +3,10 @@
 # Description: OpenWrt DIY script part 2 for CM520-79F (IPQ40xx, ARMv7)
 # Enhanced: 适配 Opboot 的 UBI 格式, 支持 Lean 源码, 可选 AdGuardHome, 增强日志
 # Modifications:
-# - 使用参考脚本的 DTS 和设备规则逻辑（a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch）
+# - 强制使用参考脚本的 DTS 补丁（a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch），适配 Opboot
 # - 移除 dnsmasq DNS 禁用、iptables 和防火墙配置
 # - 适配 Opboot 的 ubi 格式（生成 openwrt-ipq40xx-generic-mobipromo_cm520-79f-squashfs-nand-factory.ubi）
 # - 添加 WiFi 固件支持 (kmod-ath10k-ct, ipq-wifi-mobipromo_cm520-79f)
-# - 检查 Lean 源码的 DTS，优先使用
 # - 可选 AdGuardHome，通过环境变量控制
 # - 添加固件大小检查和日志持久化
 
@@ -125,7 +124,7 @@ print_summary() {
   echo ""
   echo "已完成配置："
   echo "1. ✅ 配置内核模块和WiFi固件"
-  echo "2. ✅ 应用DTS补丁或使用Lean DTS"
+  echo "2. ✅ 强制应用DTS补丁（Opboot兼容）"
   echo "3. ✅ 配置Opboot兼容的UBI设备规则"
   if [ "$ENABLE_ADGUARD" = "y" ]; then
     echo "4. ✅ 下载并配置AdGuardHome核心"
@@ -147,7 +146,7 @@ LOG_FILE="diy-part2-$(date +%Y%m%d_%H%M%S).log"
 exec 1> >(tee -a "$LOG_FILE")
 log_step "OpenWrt DIY脚本启动 - CM520-79F"
 log_info "目标设备: CM520-79F (IPQ40xx, ARMv7)"
-log_info "脚本版本: Enhanced v2.10 (适配Opboot UBI, 支持Lean源码, 可选AdGuardHome)"
+log_info "脚本版本: Enhanced v2.11 (适配Opboot UBI, 强制DTS补丁, 可选AdGuardHome)"
 log_info "日志保存到: $LOG_FILE"
 
 # 检查是否在OpenWrt构建环境中
@@ -197,67 +196,61 @@ echo "CONFIG_PACKAGE_kmod-ath10k-ct=y" >> .config || log_error "配置 kmod-ath1
 echo "CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y" >> .config || log_error "配置 ipq-wifi-mobipromo_cm520-79f 失败"
 log_success "已配置 kmod-ubi, kmod-ubifs, trx, kmod-ath10k-ct, ipq-wifi-mobipromo_cm520-79f"
 
-# -------------------- DTS补丁处理 --------------------
-log_step "下载并部署 mobipromo_cm520-79f 的 DTS 文件"
+# -------------------- DTS补丁处理（强制使用） --------------------
+log_step "下载并部署 mobipromo_cm520-79f 的 DTS 补丁（强制使用）"
 DTS_PATCH_URL="https://git.ix.gs/mptcp/openmptcprouter/commit/a66353a01576c5146ae0d72ee1f8b24ba33cb88e.patch"
 DTS_PATCH_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts.patch"
 BASE_DTS_URL="https://raw.githubusercontent.com/openwrt/openwrt/main/target/linux/ipq40xx/files/arch/arm/boot/dts/qcom-ipq4019.dts"
 BASE_DTS_FILE="$DTS_DIR/qcom-ipq4019.dts"
 
-log_info "检查Lean源码是否包含CM520-79F DTS"
-if [ -f "feeds/lede/target/linux/ipq40xx/files/arch/arm/boot/dts/qcom-ipq4019-cm520-79f.dts" ]; then
-  log_info "Lean源码已包含CM520-79F DTS，跳过补丁"
-  cp "feeds/lede/target/linux/ipq40xx/files/arch/arm/boot/dts/qcom-ipq4019-cm520-79f.dts" "$TARGET_DTS" || log_error "复制Lean DTS失败"
-else
-  log_info "下载DTS补丁..."
-  if retry_download "$DTS_PATCH_URL" "$DTS_PATCH_FILE"; then
-    log_success "DTS补丁下载完成"
-    if [ -s "$DTS_PATCH_FILE" ]; then
-      log_info "验证补丁文件: $DTS_PATCH_FILE"
-      if grep -q "qcom-ipq4019-cm520-79f.dts" "$DTS_PATCH_FILE"; then
-        log_info "补丁文件针对 qcom-ipq4019-cm520-79f.dts"
-      else
-        log_warn "补丁文件可能不针对 qcom-ipq4019-cm520-79f.dts，尝试应用"
-      fi
+log_info "下载DTS补丁（必须用于Opboot兼容）..."
+if retry_download "$DTS_PATCH_URL" "$DTS_PATCH_FILE"; then
+  log_success "DTS补丁下载完成"
+  if [ -s "$DTS_PATCH_FILE" ]; then
+    log_info "验证补丁文件: $DTS_PATCH_FILE"
+    if grep -q "qcom-ipq4019-cm520-79f.dts" "$DTS_PATCH_FILE"; then
+      log_info "补丁文件针对 qcom-ipq4019-cm520-79f.dts"
     else
-      log_error "补丁文件为空或无效: $DTS_PATCH_FILE"
-    fi
-    if ! [ -f "$TARGET_DTS" ]; then
-      log_info "目标DTS文件不存在，下载基础DTS文件: $BASE_DTS_URL"
-      if retry_download "$BASE_DTS_URL" "$BASE_DTS_FILE"; then
-        cp "$BASE_DTS_FILE" "$TARGET_DTS" || log_error "复制基础DTS文件到 $TARGET_DTS 失败"
-        log_info "已创建初始DTS文件: $TARGET_DTS"
-      else
-        log_error "基础DTS文件下载失败"
-      fi
-    else
-      log_info "目标DTS文件已存在: $TARGET_DTS，保留并应用补丁"
-    fi
-    if [ -f "$TARGET_DTS" ]; then
-      cp "$TARGET_DTS" "$TARGET_DTS.bak-$(date +%Y%m%d_%H%M%S)" || log_error "备份DTS文件失败"
-      log_info "已备份DTS文件: $TARGET_DTS.bak"
-    fi
-    if patch -d "$DTS_DIR" -p2 --dry-run < "$DTS_PATCH_FILE" >/dev/null 2>&1; then
-      if patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE" --verbose 2>&1 | tee /tmp/patch.log; then
-        log_success "DTS补丁应用成功 (p2)"
-        DTS_SIZE=$(stat -f%z "$TARGET_DTS" 2>/dev/null || stat -c%s "$TARGET_DTS" 2>/dev/null || echo "0")
-        log_success "DTS文件更新成功: $TARGET_DTS (大小: ${DTS_SIZE} 字节)"
-      else
-        log_error "DTS补丁应用失败 (p2)，查看 /tmp/patch.log"
-      fi
-    else
-      log_info "尝试使用 -p1 应用补丁"
-      if patch -d "$DTS_DIR" -p1 < "$DTS_PATCH_FILE" --verbose 2>&1 | tee /tmp/patch.log; then
-        log_success "DTS补丁应用成功 (p1)"
-        DTS_SIZE=$(stat -f%z "$TARGET_DTS" 2>/dev/null || stat -c%s "$TARGET_DTS" 2>/dev/null || echo "0")
-        log_success "DTS文件更新成功: $TARGET_DTS (大小: ${DTS_SIZE} 字节)"
-      else
-        log_error "DTS补丁应用失败 (p1 和 p2 均失败)，查看 /tmp/patch.log"
-      fi
+      log_warn "补丁文件可能不针对 qcom-ipq4019-cm520-79f.dts，尝试应用"
     fi
   else
-    log_error "DTS补丁下载失败"
+    log_error "补丁文件为空或无效: $DTS_PATCH_FILE"
   fi
+  if ! [ -f "$TARGET_DTS" ]; then
+    log_info "目标DTS文件不存在，下载基础DTS文件: $BASE_DTS_URL"
+    if retry_download "$BASE_DTS_URL" "$BASE_DTS_FILE"; then
+      cp "$BASE_DTS_FILE" "$TARGET_DTS" || log_error "复制基础DTS文件到 $TARGET_DTS 失败"
+      log_info "已创建初始DTS文件: $TARGET_DTS"
+    else
+      log_error "基础DTS文件下载失败"
+    fi
+  else
+    log_info "目标DTS文件已存在: $TARGET_DTS，保留并应用补丁"
+  fi
+  if [ -f "$TARGET_DTS" ]; then
+    cp "$TARGET_DTS" "$TARGET_DTS.bak-$(date +%Y%m%d_%H%M%S)" || log_error "备份DTS文件失败"
+    log_info "已备份DTS文件: $TARGET_DTS.bak"
+  fi
+  if patch -d "$DTS_DIR" -p2 --dry-run < "$DTS_PATCH_FILE" >/dev/null 2>&1; then
+    if patch -d "$DTS_DIR" -p2 < "$DTS_PATCH_FILE" --verbose 2>&1 | tee /tmp/patch.log; then
+      log_success "DTS补丁应用成功 (p2)"
+      DTS_SIZE=$(stat -f%z "$TARGET_DTS" 2>/dev/null || stat -c%s "$TARGET_DTS" 2>/dev/null || echo "0")
+      log_success "DTS文件更新成功: $TARGET_DTS (大小: ${DTS_SIZE} 字节)"
+    else
+      log_error "DTS补丁应用失败 (p2)，查看 /tmp/patch.log"
+    fi
+  else
+    log_info "尝试使用 -p1 应用补丁"
+    if patch -d "$DTS_DIR" -p1 < "$DTS_PATCH_FILE" --verbose 2>&1 | tee /tmp/patch.log; then
+      log_success "DTS补丁应用成功 (p1)"
+      DTS_SIZE=$(stat -f%z "$TARGET_DTS" 2>/dev/null || stat -c%s "$TARGET_DTS" 2>/dev/null || echo "0")
+      log_success "DTS文件更新成功: $TARGET_DTS (大小: ${DTS_SIZE} 字节)"
+    else
+      log_error "DTS补丁应用失败 (p1 和 p2 均失败)，查看 /tmp/patch.log"
+    fi
+  fi
+else
+  log_error "DTS补丁下载失败"
 fi
 
 # -------------------- 设备规则配置（参考脚本，适配 UBI） --------------------
