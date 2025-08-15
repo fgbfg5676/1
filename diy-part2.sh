@@ -68,17 +68,24 @@ fi
 
 # 验证DTS文件语法
 if command -v dtc >/dev/null; then
-  dtc -I dts -O dtb "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" -o /tmp/test.dtb >/dev/null 2>&1 || log_error "DTS文件语法错误"
-  rm -f /tmp/test.dtb
+  if ! dtc -I dts -O dtb "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" -o /tmp/test.dtb 2>/tmp/dtc_error.log; then
+    log_error "DTS文件语法错误，详细错误：$(cat /tmp/dtc_error.log)"
+  else
+    log_success "DTS文件语法验证通过"
+  fi
+  rm -f /tmp/test.dtb /tmp/dtc_error.log
 else
   log_info "未找到dtc工具，跳过DTS语法验证"
 fi
+
 # 确保DTS包含必要头文件
 if ! grep -q "/dts-v1/;" "$DTS_DIR/qcom-ipq4019-cm520-79f.dts"; then
   sed -i '1i /dts-v1/;' "$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
+  log_info "添加 /dts-v1/; 到DTS文件"
 fi
 if ! grep -q "#include \"qcom-ipq4019.dtsi\"" "$DTS_DIR/qcom-ipq4019-cm520-79f.dts"; then
   sed -i '2i #include "qcom-ipq4019.dtsi"' "$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
+  log_info "添加 #include \"qcom-ipq4019.dtsi\" 到DTS文件"
 fi
 log_success "DTS文件验证和修复完成"
 
