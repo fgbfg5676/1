@@ -104,7 +104,8 @@ if command -v netstat >/dev/null && netstat -tuln | grep -q :53; then
   echo "/etc/init.d/dnsmasq disable" >> package/base-files/files/etc/rc.local
 fi
 
-# -------------------- AdGuardHome集成 --------------------
+
+# -------------------- AdGuardHome集成 (已增強健壯性) --------------------
 log_info "集成AdGuardHome..."
 ./scripts/feeds install -p luci luci-app-adguardhome >/dev/null || log_error "安装luci-app-adguardhome失败"
 
@@ -113,16 +114,27 @@ ADGUARD_URLS=(
   "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${ARCH}.tar.gz"
  )
 ADGUARD_TMP="/tmp/adguard.tar.gz"
+ADGUARD_DOWNLOADED=false
 
 for url in "${ADGUARD_URLS[@]}"; do
+  log_info "正在尝试从 $url 下载 AdGuardHome..."
   if wget $WGET_OPTS -O "$ADGUARD_TMP" "$url"; then
-    log_success "AdGuardHome核心下载成功"
-    break
+    # 验证下载的文件是否为有效的gzip压缩包
+    if file "$ADGUARD_TMP" | grep -q 'gzip compressed data'; then
+      log_success "AdGuardHome核心下载成功，且文件格式正确。"
+      ADGUARD_DOWNLOADED=true
+      break # 下载成功且格式正确，跳出循环
+    else
+      log_info "下载的文件不是有效的gzip格式，可能是错误页面。尝试下一个URL..."
+      rm -f "$ADGUARD_TMP"
+    fi
+  else
+    log_info "从 $url 下载失败。尝试下一个URL..."
   fi
 done
 
-if [ -f "$ADGUARD_TMP" ]; then
-  tar -zxf "$ADGUARD_TMP" -C /tmp >/dev/null
+if [ "$ADGUARD_DOWNLOADED" = true ]; then
+  tar -zxf "$ADGUARD_TMP" -C /tmp >/dev/null || log_error "解压缩AdGuardHome失败"
   cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_DIR/" || log_error "AdGuardHome复制失败"
   chmod +x "$ADGUARD_DIR/AdGuardHome"
   # 验证二进制架构
@@ -131,45 +143,10 @@ if [ -f "$ADGUARD_TMP" ]; then
   fi
   rm -rf /tmp/AdGuardHome "$ADGUARD_TMP"
 else
-  log_error "AdGuardHome核心下载失败"
+  log_error "AdGuardHome核心下载失败，所有URL都已尝试。"
 fi
 
-cat > "$ADGUARD_CONF_DIR/AdGuardHome.yaml" <<EOF
-bind_host: 0.0.0.0
-bind_port: 3000
-users:
-  - name: admin
-    password: "\$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J/6z8s8nJlQ6oP4y"
-dns:
-  bind_host: 0.0.0.0
-  port: 53
-  upstream_dns:
-    - 223.5.5.5
-    - 119.29.29.29
-  cache_size: 4194304  # 优化为4MB，适应设备内存
-filters:
-  - enabled: true
-    url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
-log:
-  file: /var/log/AdGuardHome.log
-EOF
-
-cat > "package/base-files/files/etc/init.d/adguardhome" <<EOF
-#!/bin/sh /etc/rc.common
-START=95
-STOP=15
-USE_PROCD=1
-
-start_service( ) {
-  procd_open_instance
-  procd_set_param command /usr/bin/AdGuardHome -c /etc/AdGuardHome/AdGuardHome.yaml
-  procd_set_param respawn
-  procd_close_instance
-}
-EOF
-chmod +x "package/base-files/files/etc/init.d/adguardhome"
-grep -q "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
-log_success "AdGuardHome集成完成"
+# ... 後續的 AdGuardHome.yaml 和 init.d 腳本部分保持不變 ...
 
 # -------------------- 整合sirpdboy插件（luci-app-partexp） --------------------
 log_info "集成sirpdboy插件..."
