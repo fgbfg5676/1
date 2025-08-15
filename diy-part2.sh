@@ -15,10 +15,16 @@ ADGUARD_CONF_DIR="package/base-files/files/etc/AdGuardHome"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
-CUSTOM_DTS="qcom-ipq4019-cm520-79f.dts"
+CUSTOM_DTS="../qcom-ipq4019-cm520-79f.dts"  # 适配GitHub Actions工作目录
 
 # 创建必要目录
 mkdir -p "$ADGUARD_DIR" "$ADGUARD_CONF_DIR" "$DTS_DIR" "$CUSTOM_PLUGINS_DIR" || log_error "创建目录失败"
+
+# -------------------- 调试信息 --------------------
+log_info "调试信息：当前工作目录：$(pwd)"
+log_info "调试信息：仓库根目录文件列表："
+ls -la .. || log_info "无法列出仓库根目录文件"
+log_info "调试信息：检查DTS文件：$CUSTOM_DTS"
 
 # -------------------- 替换自定义DTS文件 --------------------
 log_info "替换自定义DTS文件..."
@@ -40,7 +46,14 @@ if [ -f "$CUSTOM_DTS" ]; then
   fi
   log_success "自定义DTS文件替换完成"
 else
-  log_error "未找到自定义DTS文件：$CUSTOM_DTS"
+  # 备用路径检查
+  log_info "尝试在当前目录查找DTS文件..."
+  if [ -f "qcom-ipq4019-cm520-79f.dts" ]; then
+    cp "qcom-ipq4019-cm520-79f.dts" "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" || log_error "复制备用DTS文件失败"
+    log_success "从当前目录找到并替换DTS文件"
+  else
+    log_error "未找到DTS文件：$CUSTOM_DTS 或 qcom-ipq4019-cm520-79f.dts"
+  fi
 fi
 
 # -------------------- 内核模块与工具配置 --------------------
@@ -99,81 +112,4 @@ bind_host: 0.0.0.0
 bind_port: 3000
 users:
   - name: admin
-    password: "\$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J/6z8s8nJlQ6oP4y"
-dns:
-  bind_host: 0.0.0.0
-  port: 53
-  upstream_dns:
-    - 223.5.5.5
-    - 119.29.29.29
-  cache_size: 4194304  # 优化为4MB，适应设备内存
-filters:
-  - enabled: true
-    url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
-log:
-  file: /var/log/AdGuardHome.log
-EOF
-
-cat > "package/base-files/files/etc/init.d/adguardhome" <<EOF
-#!/bin/sh /etc/rc.common
-START=95
-STOP=15
-USE_PROCD=1
-
-start_service() {
-  procd_open_instance
-  procd_set_param command /usr/bin/AdGuardHome -c /etc/AdGuardHome/AdGuardHome.yaml
-  procd_set_param respawn
-  procd_close_instance
-}
-EOF
-chmod +x "package/base-files/files/etc/init.d/adguardhome"
-grep -q "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
-log_success "AdGuardHome集成完成"
-
-# -------------------- 整合sirpdboy插件（luci-app-partexp） --------------------
-log_info "集成sirpdboy插件..."
-rm -rf "$CUSTOM_PLUGINS_DIR/luci-app-partexp"
-if git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp" || \
-   git clone --depth 1 https://gitee.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
-  ./scripts/feeds update -a >/dev/null
-  ./scripts/feeds install -a >/dev/null || log_error "插件依赖安装失败"
-  grep -q "CONFIG_PACKAGE_luci-app-partexp=y" .config || echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
-  log_success "sirpdboy插件集成完成"
-else
-  log_error "sirpdboy插件克隆失败"
-fi
-
-# -------------------- 设备规则配置 --------------------
-log_info "配置设备规则..."
-if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
-    cat <<EOF >> "$GENERIC_MK"
-
-define Device/mobipromo_cm520-79f
-  DEVICE_VENDOR := MobiPromo
-  DEVICE_MODEL := CM520-79F
-  DEVICE_DTS := qcom-ipq4019-cm520-79f
-  KERNEL_SIZE := 4096k
-  ROOTFS_SIZE := 16384k
-  IMAGE_SIZE := 81920k  # 优化为80MB
-  IMAGE/trx := append-kernel | pad-to \$(KERNEL_SIZE) | append-rootfs | trx -o \$@
-endef
-TARGET_DEVICES += mobipromo_cm520-79f
-EOF
-    log_success "设备规则添加完成"
-else
-    # 更新IMAGE_SIZE为80MB
-    sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
-    log_info "设备规则已存在，更新IMAGE_SIZE为80MB"
-fi
-
-# -------------------- 最终配置 --------------------
-log_info "更新软件包索引..."
-if ! ./scripts/feeds update -a >/dev/null; then
-  log_info "尝试使用国内镜像更新feeds..."
-  sed -i 's|https://github.com|https://ghproxy.com/https://github.com|' feeds.conf.default
-  ./scripts/feeds update -a >/dev/null || log_error "feeds更新失败"
-fi
-./scripts/feeds install -a >/dev/null || log_error "feeds安装失败"
-
-log_success "所有配置完成（含AdGuardHome、sirpdboy插件和自定义DTS）"
+    password: "\$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J
