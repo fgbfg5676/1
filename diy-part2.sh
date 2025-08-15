@@ -1,5 +1,5 @@
 #!/bin/bash
-# 完整整合版：含AdGuardHome、sirpdboy插件、自定义DTS及核心配置
+# 完整整合版：含AdGuardHome、sirpdboy插件、自定义DTS及核心配置 (已修正DTS驗證問題)
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -22,7 +22,7 @@ DTS_URL="https://raw.githubusercontent.com/fgbfg5676/1/main/qcom-ipq4019-cm520-7
 mkdir -p "$ADGUARD_DIR" "$ADGUARD_CONF_DIR" "$DTS_DIR" "$CUSTOM_PLUGINS_DIR" || log_error "创建目录失败"
 
 # -------------------- 调试信息 --------------------
-log_info "调试信息：当前工作目录：$(pwd)"
+log_info "调试信息：当前工作目录：$(pwd )"
 log_info "调试信息：仓库根目录文件列表："
 ls -la .. || log_info "无法列出仓库根目录文件"
 log_info "调试信息：当前目录文件列表："
@@ -66,17 +66,11 @@ if [ "$DTS_FOUND" -eq 0 ]; then
   log_error "未找到DTS文件：${DTS_PATTERNS[*]} 或 $DTS_URL"
 fi
 
-# 验证DTS文件语法
-if command -v dtc >/dev/null; then
-  if ! dtc -I dts -O dtb "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" -o /tmp/test.dtb 2>/tmp/dtc_error.log; then
-    log_error "DTS文件语法错误，详细错误：$(cat /tmp/dtc_error.log)"
-  else
-    log_success "DTS文件语法验证通过"
-  fi
-  rm -f /tmp/test.dtb /tmp/dtc_error.log
-else
-  log_info "未找到dtc工具，跳过DTS语法验证"
-fi
+# -------------------- DTS 语法验证（已修改） --------------------
+# 移除了本地DTC验证步骤，因为它无法正确处理 #include 指令，会导致编译提前失败。
+# OpenWrt的完整编译流程会以正确的方式（先预处理再编译）处理DTS文件，因此这个本地验证是不必要的。
+log_info "跳过DTS文件本地语法验证，将由OpenWrt完整编译流程处理。"
+
 
 # 确保DTS包含必要头文件
 if ! grep -q "/dts-v1/;" "$DTS_DIR/qcom-ipq4019-cm520-79f.dts"; then
@@ -117,7 +111,7 @@ log_info "集成AdGuardHome..."
 ADGUARD_URLS=(
   "https://ghproxy.com/https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${ARCH}.tar.gz"
   "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${ARCH}.tar.gz"
-)
+ )
 ADGUARD_TMP="/tmp/adguard.tar.gz"
 
 for url in "${ADGUARD_URLS[@]}"; do
@@ -166,7 +160,7 @@ START=95
 STOP=15
 USE_PROCD=1
 
-start_service() {
+start_service( ) {
   procd_open_instance
   procd_set_param command /usr/bin/AdGuardHome -c /etc/AdGuardHome/AdGuardHome.yaml
   procd_set_param respawn
@@ -202,7 +196,7 @@ define Device/mobipromo_cm520-79f
   KERNEL_SIZE := 4096k
   ROOTFS_SIZE := 16384k
   IMAGE_SIZE := 81920k  # 优化为80MB
-  IMAGE/trx := append-kernel | pad-to \$(KERNEL_SIZE) | append-rootfs | trx -o \$@
+  IMAGE/trx := append-kernel | pad-to \$(KERNEL_SIZE ) | append-rootfs | trx -o \$@
 endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
@@ -222,4 +216,4 @@ if ! ./scripts/feeds update -a >/dev/null; then
 fi
 ./scripts/feeds install -a >/dev/null || log_error "feeds安装失败"
 
-log_success "所有配置完成（含AdGuardHome、sirpdboy插件和自定义DTS）"
+log_success "所有配置完成（含AdGuardHome、sirpdboy插件和自定义DTS ）"
