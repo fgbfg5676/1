@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v5：真正完整的版本，無任何省略，修復了文本處理錯誤
+# 最終解決方案腳本 v6：修正了DTS模板中的單行語法錯誤，提供最終完整版
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -16,56 +16,193 @@ CUSTOM_PLUGINS_DIR="package/custom"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
 ADGUARD_CONF_DIR="package/base-files/files/etc/AdGuardHome"
 
-# -------------------- 步驟 1：定義Lean的DTS為模板 --------------------
+# -------------------- 步驟 1：定義Lean的DTS為模板（已格式化修正） --------------------
 read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 #include "qcom-ipq4019.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/soc/qcom,tcsr.h>
+
 / {
 	model = "MobiPromo CM520-79F";
 	compatible = "mobipromo,cm520-79f";
+
 	aliases {
 		led-boot = &led_sys;
 		led-failsafe = &led_sys;
 		led-running = &led_sys;
 		led-upgrade = &led_sys;
 	};
+
 	chosen {
 		bootargs-append = " ubi.block=0,1 root=/dev/ubiblock0_1";
 	};
+
 	soc {
-		rng@22000 { status = "okay"; };
-		mdio@90000 { status = "okay"; pinctrl-0 = <&mdio_pins>; pinctrl-names = "default"; reset-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>; reset-delay-us = <1000>; };
-		ess-psgmii@98000 { status = "okay"; };
-		tcsr@1949000 { compatible = "qcom,tcsr"; reg = <0x1949000 0x100>; qcom,wifi_glb_cfg = <TCSR_WIFI_GLB_CFG>; };
-		tcsr@194b000 { compatible = "qcom,tcsr"; reg = <0x194b000 0x100>; qcom,usb-hsphy-mode-select = <TCSR_USB_HSPHY_HOST_MODE>; };
-		ess_tcsr@1953000 { compatible = "qcom,tcsr"; reg = <0x1953000 0x1000>; qcom,ess-interface-select = <TCSR_ESS_PSGMII>; };
-		tcsr@1957000 { compatible = "qcom,tcsr"; reg = <0x1957000 0x100>; qcom,wifi_noc_memtype_m0_m2 = <TCSR_WIFI_NOC_MEMTYPE_M0_M2>; };
-		usb2@60f8800 { status = "okay"; dwc3@6000000 { #address-cells = <1>; #size-cells = <0>; usb2_port1: port@1 { reg = <1>; #trigger-source-cells = <0; }; }; };
-		usb3@8af8800 { status = "okay"; dwc3@8a00000 { #address-cells = <1>; #size-cells = <0>; usb3_port1: port@1 { reg = <1>; #trigger-source-cells = <0; }; usb3_port2: port@2 { reg = <2>; #trigger-source-cells = <0; }; }; };
-		crypto@8e3a000 { status = "okay"; };
-		watchdog@b017000 { status = "okay"; };
-		ess-switch@c000000 { status = "okay"; };
-		edma@c080000 { status = "okay"; };
+		rng@22000 {
+			status = "okay";
+		};
+
+		mdio@90000 {
+			status = "okay";
+			pinctrl-0 = <&mdio_pins>;
+			pinctrl-names = "default";
+			reset-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
+			reset-delay-us = <1000>;
+		};
+
+		ess-psgmii@98000 {
+			status = "okay";
+		};
+
+		tcsr@1949000 {
+			compatible = "qcom,tcsr";
+			reg = <0x1949000 0x100>;
+			qcom,wifi_glb_cfg = <TCSR_WIFI_GLB_CFG>;
+		};
+
+		tcsr@194b000 {
+			compatible = "qcom,tcsr";
+			reg = <0x194b000 0x100>;
+			qcom,usb-hsphy-mode-select = <TCSR_USB_HSPHY_HOST_MODE>;
+		};
+
+		ess_tcsr@1953000 {
+			compatible = "qcom,tcsr";
+			reg = <0x1953000 0x1000>;
+			qcom,ess-interface-select = <TCSR_ESS_PSGMII>;
+		};
+
+		tcsr@1957000 {
+			compatible = "qcom,tcsr";
+			reg = <0x1957000 0x100>;
+			qcom,wifi_noc_memtype_m0_m2 = <TCSR_WIFI_NOC_MEMTYPE_M0_M2>;
+		};
+
+		usb2@60f8800 {
+			status = "okay";
+			dwc3@6000000 {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				usb2_port1: port@1 {
+					reg = <1>;
+					#trigger-source-cells = <0>;
+				};
+			};
+		};
+
+		usb3@8af8800 {
+			status = "okay";
+			dwc3@8a00000 {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				usb3_port1: port@1 {
+					reg = <1>;
+					#trigger-source-cells = <0>;
+				};
+				usb3_port2: port@2 {
+					reg = <2>;
+					#trigger-source-cells = <0>;
+				};
+			};
+		};
+
+		crypto@8e3a000 {
+			status = "okay";
+		};
+
+		watchdog@b017000 {
+			status = "okay";
+		};
+
+		ess-switch@c000000 {
+			status = "okay";
+		};
+
+		edma@c080000 {
+			status = "okay";
+		};
 	};
-	led_spi { compatible = "spi-gpio"; #address-cells = <1>; #size-cells = <0>; sck-gpios = <&tlmm 40 GPIO_ACTIVE_HIGH>; mosi-gpios = <&tlmm 36 GPIO_ACTIVE_HIGH>; num-chipselects = <0>; led_gpio: led_gpio@0 { compatible = "fairchild,74hc595"; reg = <0>; gpio-controller; #gpio-cells = <2>; registers-number = <1>; spi-max-frequency = <1000000>; }; };
-	leds { compatible = "gpio-leds"; usb { label = "blue:usb"; gpios = <&tlmm 10 GPIO_ACTIVE_HIGH>; linux,default-trigger = "usbport"; trigger-sources = <&usb3_port1>, <&usb3_port2>, <&usb2_port1>; }; led_sys: can { label = "blue:can"; gpios = <&tlmm 11 GPIO_ACTIVE_HIGH>; }; wan { label = "blue:wan"; gpios = <&led_gpio 0 GPIO_ACTIVE_LOW>; }; lan1 { label = "blue:lan1"; gpios = <&led_gpio 1 GPIO_ACTIVE_LOW>; }; lan2 { label = "blue:lan2"; gpios = <&led_gpio 2 GPIO_ACTIVE_LOW>; }; wlan2g { label = "blue:wlan2g"; gpios = <&led_gpio 5 GPIO_ACTIVE_LOW>; linux,default-trigger = "phy0tpt"; }; wlan5g { label = "blue:wlan5g"; gpios = <&led_gpio 6 GPIO_ACTIVE_LOW>; linux,default-trigger = "phy1tpt"; }; };
-	keys { compatible = "gpio-keys"; reset { label = "reset"; gpios = <&tlmm 18 GPIO_ACTIVE_LOW>; linux,code = <KEY_RESTART>; }; };
+
+	led_spi {
+		compatible = "spi-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		sck-gpios = <&tlmm 40 GPIO_ACTIVE_HIGH>;
+		mosi-gpios = <&tlmm 36 GPIO_ACTIVE_HIGH>;
+		num-chipselects = <0>;
+		led_gpio: led_gpio@0 {
+			compatible = "fairchild,74hc595";
+			reg = <0>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			registers-number = <1>;
+			spi-max-frequency = <1000000>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		usb {
+			label = "blue:usb";
+			gpios = <&tlmm 10 GPIO_ACTIVE_HIGH>;
+			linux,default-trigger = "usbport";
+			trigger-sources = <&usb3_port1>, <&usb3_port2>, <&usb2_port1>;
+		};
+		led_sys: can {
+			label = "blue:can";
+			gpios = <&tlmm 11 GPIO_ACTIVE_HIGH>;
+		};
+		wan {
+			label = "blue:wan";
+			gpios = <&led_gpio 0 GPIO_ACTIVE_LOW>;
+		};
+		lan1 {
+			label = "blue:lan1";
+			gpios = <&led_gpio 1 GPIO_ACTIVE_LOW>;
+		};
+		lan2 {
+			label = "blue:lan2";
+			gpios = <&led_gpio 2 GPIO_ACTIVE_LOW>;
+		};
+		wlan2g {
+			label = "blue:wlan2g";
+			gpios = <&led_gpio 5 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "phy0tpt";
+		};
+		wlan5g {
+			label = "blue:wlan5g";
+			gpios = <&led_gpio 6 GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "phy1tpt";
+		};
+	};
+
+	keys {
+		compatible = "gpio-keys";
+		reset {
+			label = "reset";
+			gpios = <&tlmm 18 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+	};
 };
+
 &blsp_dma { status = "okay"; };
 &blsp1_uart1 { status = "okay"; };
 &blsp1_uart2 { status = "okay"; };
 &cryptobam { status = "okay"; };
+
 &gmac0 {
 	nvmem-cells = <&macaddr_art_1006>;
 	nvmem-cell-names = "mac-address";
 };
+
 &gmac1 {
 	nvmem-cells = <&macaddr_art_5006>;
 	nvmem-cell-names = "mac-address";
 };
+
 &nand {
 	pinctrl-0 = <&nand_pins>;
 	pinctrl-names = "default";
@@ -102,11 +239,36 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 		};
 	};
 };
+
 &qpic_bam { status = "okay"; };
+
 &tlmm {
-	mdio_pins: mdio_pinmux { mux_1 { pins = "gpio6"; function = "mdio"; bias-pull-up; }; mux_2 { pins = "gpio7"; function = "mdc"; bias-pull-up; }; };
-	nand_pins: nand_pins { pullups { pins = "gpio52", "gpio53", "gpio58", "gpio59"; function = "qpic"; bias-pull-up; }; pulldowns { pins = "gpio54", "gpio55", "gpio56", "gpio57", "gpio60", "gpio61", "gpio62", "gpio63", "gpio64", "gpio65", "gpio66", "gpio67", "gpio68", "gpio69"; function = "qpic"; bias-pull-down; }; };
+	mdio_pins: mdio_pinmux {
+		mux_1 {
+			pins = "gpio6";
+			function = "mdio";
+			bias-pull-up;
+		};
+		mux_2 {
+			pins = "gpio7";
+			function = "mdc";
+			bias-pull-up;
+		};
+	};
+	nand_pins: nand_pins {
+		pullups {
+			pins = "gpio52", "gpio53", "gpio58", "gpio59";
+			function = "qpic";
+			bias-pull-up;
+		};
+		pulldowns {
+			pins = "gpio54", "gpio55", "gpio56", "gpio57", "gpio60", "gpio61", "gpio62", "gpio63", "gpio64", "gpio65", "gpio66", "gpio67", "gpio68", "gpio69";
+			function = "qpic";
+			bias-pull-down;
+		};
+	};
 };
+
 &usb3_ss_phy { status = "okay"; };
 &usb3_hs_phy { status = "okay"; };
 &usb2_hs_phy { status = "okay"; };
@@ -189,6 +351,7 @@ mkdir -p "$DTS_DIR"
 echo "$Patched_DTS" > "$DTS_FILE"
 log_success "DTS文件寫入成功。"
 
+# (後續腳本內容與上一版完全相同，此處為完整呈現)
 # -------------------- 創建網絡配置文件 --------------------
 log_info "創建針對 CM520-79F 的網絡配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
