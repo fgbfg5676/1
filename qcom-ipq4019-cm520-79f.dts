@@ -201,6 +201,32 @@
 	status = "okay";
 };
 
+&gmac {
+	status = "okay";
+	nvmem-cells = <&macaddr_art_1006>;
+	nvmem-cell-names = "mac-address";
+};
+
+&switch {
+	status = "okay";
+};
+
+&swport3 {
+	status = "okay";
+	label = "lan2";
+};
+
+&swport4 {
+	status = "okay";
+	label = "lan1";
+};
+
+&swport5 {
+	status = "okay";
+	nvmem-cells = <&macaddr_art_5006>;
+	nvmem-cell-names = "mac-address";
+};
+
 &nand {
 	pinctrl-0 = <&nand_pins>;
 	pinctrl-names = "default";
@@ -300,36 +326,6 @@
 
 &usb2_hs_phy {
 	status = "okay";
-};
-
-&gmac {
-	status = "okay";
-
-	nvmem-cells = <&macaddr_art_1006>;
-	nvmem-cell-names = "mac-address";
-};
-
-&switch {
-	status = "okay";
-};
-
-&swport3 {
-	status = "okay";
-
-	label = "lan2";
-};
-
-&swport4 {
-	status = "okay";
-
-	label = "lan1";
-};
-
-&swport5 {
-	status = "okay";
-
-	nvmem-cells = <&macaddr_art_5006>;
-	nvmem-cell-names = "mac-address";
 };
 
 &wifi0 {
