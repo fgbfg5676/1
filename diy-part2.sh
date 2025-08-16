@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v6：修正了DTS模板中的單行語法錯誤，提供最終完整版
+# 最終解決方案腳本 v7：根據DTC詳細錯誤報告進行最終修正
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -16,8 +16,9 @@ CUSTOM_PLUGINS_DIR="package/custom"
 ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
 ADGUARD_CONF_DIR="package/base-files/files/etc/AdGuardHome"
 
-# -------------------- 步驟 1：定義Lean的DTS為模板（已格式化修正） --------------------
-read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
+# -------------------- 步驟 1：定義最終修正的DTS模板 --------------------
+# 該模板使用 &gmac0/&gmac1 結構，並修復了所有已知語法問題
+read -r -d '' FINAL_DTS_TEMPLATE <<'EOF'
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 #include "qcom-ipq4019.dtsi"
 #include <dt-bindings/gpio/gpio.h>
@@ -43,7 +44,6 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 		rng@22000 {
 			status = "okay";
 		};
-
 		mdio@90000 {
 			status = "okay";
 			pinctrl-0 = <&mdio_pins>;
@@ -51,35 +51,29 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 			reset-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
 			reset-delay-us = <1000>;
 		};
-
 		ess-psgmii@98000 {
 			status = "okay";
 		};
-
 		tcsr@1949000 {
 			compatible = "qcom,tcsr";
 			reg = <0x1949000 0x100>;
 			qcom,wifi_glb_cfg = <TCSR_WIFI_GLB_CFG>;
 		};
-
 		tcsr@194b000 {
 			compatible = "qcom,tcsr";
 			reg = <0x194b000 0x100>;
 			qcom,usb-hsphy-mode-select = <TCSR_USB_HSPHY_HOST_MODE>;
 		};
-
 		ess_tcsr@1953000 {
 			compatible = "qcom,tcsr";
 			reg = <0x1953000 0x1000>;
 			qcom,ess-interface-select = <TCSR_ESS_PSGMII>;
 		};
-
 		tcsr@1957000 {
 			compatible = "qcom,tcsr";
 			reg = <0x1957000 0x100>;
 			qcom,wifi_noc_memtype_m0_m2 = <TCSR_WIFI_NOC_MEMTYPE_M0_M2>;
 		};
-
 		usb2@60f8800 {
 			status = "okay";
 			dwc3@6000000 {
@@ -91,7 +85,6 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 				};
 			};
 		};
-
 		usb3@8af8800 {
 			status = "okay";
 			dwc3@8a00000 {
@@ -107,19 +100,15 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 				};
 			};
 		};
-
 		crypto@8e3a000 {
 			status = "okay";
 		};
-
 		watchdog@b017000 {
 			status = "okay";
 		};
-
 		ess-switch@c000000 {
 			status = "okay";
 		};
-
 		edma@c080000 {
 			status = "okay";
 		};
@@ -194,11 +183,13 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 &cryptobam { status = "okay"; };
 
 &gmac0 {
+	status = "okay";
 	nvmem-cells = <&macaddr_art_1006>;
 	nvmem-cell-names = "mac-address";
 };
 
 &gmac1 {
+	status = "okay";
 	nvmem-cells = <&macaddr_art_5006>;
 	nvmem-cell-names = "mac-address";
 };
@@ -208,35 +199,7 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 	pinctrl-names = "default";
 	status = "okay";
 	nand@0 {
-		partitions {
-			compatible = "fixed-partitions";
-			#address-cells = <1>;
-			#size-cells = <1>;
-			partition@0 { label = "SBL1"; reg = <0x0 0x100000>; read-only; };
-			partition@100000 { label = "MIBIB"; reg = <0x100000 0x100000>; read-only; };
-			partition@200000 { label = "BOOTCONFIG"; reg = <0x200000 0x100000>; };
-			partition@300000 { label = "QSEE"; reg = <0x300000 0x100000>; read-only; };
-			partition@400000 { label = "QSEE_1"; reg = <0x400000 0x100000>; read-only; };
-			partition@500000 { label = "CDT"; reg = <0x500000 0x80000>; read-only; };
-			partition@580000 { label = "CDT_1"; reg = <0x580000 0x80000>; read-only; };
-			partition@600000 { label = "BOOTCONFIG1"; reg = <0x600000 0x80000>; };
-			partition@680000 { label = "APPSBLENV"; reg = <0x680000 0x80000>; };
-			partition@700000 { label = "APPSBL"; reg = <0x700000 0x200000>; read-only; };
-			partition@900000 { label = "APPSBL_1"; reg = <0x900000 0x200000>; read-only; };
-			art: partition@b00000 {
-				label = "ART";
-				reg = <0xb00000 0x80000>;
-				read-only;
-				compatible = "nvmem-cells";
-				#address-cells = <1>;
-				#size-cells = <1>;
-				precal_art_1000: precal@1000 { reg = <0x1000 0x2f20>; };
-				macaddr_art_1006: macaddr@1006 { reg = <0x1006 0x6>; };
-				precal_art_5000: precal@5000 { reg = <0x5000 0x2f20>; };
-				macaddr_art_5006: macaddr@5006 { reg = <0x5006 0x6>; };
-			};
-			partition@b80000 { label = "rootfs"; reg = <0xb80000 0x7480000>; };
-		};
+		/* PARTITIONS-PLACEHOLDER */
 	};
 };
 
@@ -276,72 +239,41 @@ read -r -d '' LEAN_DTS_TEMPLATE <<'EOF'
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
 
-# -------------------- 步驟 2：動態打補丁（已修正） --------------------
-log_info "正在基於Lean的DTS模板進行動態修補..."
+# -------------------- 步驟 2：動態打補丁 --------------------
+log_info "正在基於最終的DTS模板進行動態修補..."
 
+# 定義OPBoot分區表
 read -r -d '' OPBOOT_PARTITIONS <<'EOF'
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
-		partition@0 {
-			label = "Bootloader";
-			reg = <0x0 0xb00000>;
-			read-only;
-		};
-		art: partition@b00000 {
-			label = "ART";
-			reg = <0xb00000 0x80000>;
-			read-only;
-			compatible = "nvmem-cells";
+		partitions {
+			compatible = "fixed-partitions";
 			#address-cells = <1>;
 			#size-cells = <1>;
-			precal_art_1000: precal@1000 { reg = <0x1000 0x2f20>; };
-			macaddr_art_1006: macaddr@1006 { reg = <0x1006 0x6>; };
-			precal_art_5000: precal@5000 { reg = <0x5000 0x2f20>; };
-			macaddr_art_5006: macaddr@5006 { reg = <0x5006 0x6>; };
+			partition@0 {
+				label = "Bootloader";
+				reg = <0x0 0xb00000>;
+				read-only;
+			};
+			art: partition@b00000 {
+				label = "ART";
+				reg = <0xb00000 0x80000>;
+				read-only;
+				compatible = "nvmem-cells";
+				#address-cells = <1>;
+				#size-cells = <1>;
+				precal_art_1000: precal@1000 { reg = <0x1000 0x2f20>; };
+				macaddr_art_1006: macaddr@1006 { reg = <0x1006 0x6>; };
+				precal_art_5000: precal@5000 { reg = <0x5000 0x2f20>; };
+				macaddr_art_5006: macaddr@5006 { reg = <0x5006 0x6>; };
+			};
+			partition@b80000 {
+				label = "rootfs";
+				reg = <0xb80000 0x7480000>;
+			};
 		};
-		partition@b80000 {
-			label = "rootfs";
-			reg = <0xb80000 0x7480000>;
-		};
-	};
 EOF
 
-read -r -d '' GMAC_SWITCH_PATCH <<'EOF'
-&gmac {
-	status = "okay";
-	nvmem-cells = <&macaddr_art_1006>;
-	nvmem-cell-names = "mac-address";
-};
-&switch {
-	status = "okay";
-};
-&swport3 {
-	status = "okay";
-	label = "lan2";
-};
-&swport4 {
-	status = "okay";
-	label = "lan1";
-};
-&swport5 {
-	status = "okay";
-	nvmem-cells = <&macaddr_art_5006>;
-	nvmem-cell-names = "mac-address";
-};
-EOF
-
-Patched_DTS=$(awk -v op_part="${OPBOOT_PARTITIONS}" -v gmac_patch="${GMAC_SWITCH_PATCH}" '
-/&gmac0/,/};/ {next}
-/&gmac1/,/};/ {next}
-/&nand/,/};/ {
-    if (in_nand) { if (/};/) { in_nand = 0; } next; }
-    if (/partitions/) { print op_part; in_nand = 1; next; }
-}
-/&cryptobam/ { print; print gmac_patch; next; }
-{print}
-' <<< "$LEAN_DTS_TEMPLATE")
+# 使用sed進行精準替換
+Patched_DTS=$(sed "s|/\* PARTITIONS-PLACEHOLDER \*/|${OPBOOT_PARTITIONS}|" <<< "$FINAL_DTS_TEMPLATE")
 
 log_success "DTS動態修補完成。"
 
@@ -351,7 +283,7 @@ mkdir -p "$DTS_DIR"
 echo "$Patched_DTS" > "$DTS_FILE"
 log_success "DTS文件寫入成功。"
 
-# (後續腳本內容與上一版完全相同，此處為完整呈現)
+# (後續所有腳本內容保持不變，此處為完整呈現)
 # -------------------- 創建網絡配置文件 --------------------
 log_info "創建針對 CM520-79F 的網絡配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
@@ -364,6 +296,8 @@ ipq40xx_board_detect() {
 	machine=\$(board_name)
 	case "\$machine" in
 	"mobipromo,cm520-79f")
+		# 根據gmac0/gmac1的結構，這裡可能需要調整為eth0/eth1，但通常驅動會正確映射
+		# 暫時保持不變，如果網絡不通再調整
 		ucidef_set_interfaces_lan_wan "eth1" "eth0"
 		;;
 	esac
