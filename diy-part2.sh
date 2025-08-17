@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# 最終解決方案腳本 v37 - 畢業作品
+# 最終解決方案腳本 v40 - 畢業作品（返璞歸真版）
 # 作者: The Architect & Manus AI
-# 描述: 一個單一、完整的腳本，包含了從環境準備到最終配置的所有步驟。
-#       採用了最優雅的DTS定義、網絡配置和Makefile集成方案。
+# 描述: 一個單一、完整的腳本，回歸了最正確的架構。
+#       它只負責生成所有必要的配置文件，然後將構建任務完全交給make。
 #
 
 # --- 啟用嚴格模式，任何錯誤立即終止 ---
@@ -363,24 +363,27 @@ endef
 
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR )
-	cd $(PKG_BUILD_DIR)
-	
-	local AGH_URL=$$(curl -fsSL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | \
+	cd $(PKG_BUILD_DIR); \
+	\
+	AGH_URL=$$(curl -fsSL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | \
 	                  grep "browser_download_url.*linux_armv7.tar.gz" | \
-	                  cut -d '"' -f 4 )
+	                  cut -d '"' -f 4 ); \
 	if [ -z "$$AGH_URL" ]; then \
 		echo "Error: Could not get AdGuardHome download URL." >&2; \
 		exit 1; \
-	fi
-	
-	# 用 curl -# 显示进度条下载
-	curl -fSL -# -o AdGuardHome.tar.gz "$$AGH_URL"
-	tar -xzf AdGuardHome.tar.gz
-
-	if [ ! -f "$(PKG_BUILD_DIR)/AdGuardHome/AdGuardHome" ]; then \
+	fi; \
+	\
+	echo "INFO: Preparing to download from $$AGH_URL"; \
+	wget --show-progress -O AdGuardHome.tar.gz "$$AGH_URL"; \
+	\
+	echo "INFO: Extracting package..."; \
+	tar -xzf AdGuardHome.tar.gz; \
+	\
+	if [ ! -f "AdGuardHome/AdGuardHome" ]; then \
 		echo "Error: AdGuardHome binary not found after extraction." >&2; \
 		exit 1; \
-	fi
+	fi; \
+	echo "INFO: AdGuardHome binary prepared successfully."
 endef
 
 define Build/Compile
