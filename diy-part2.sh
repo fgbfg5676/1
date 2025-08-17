@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# 最終解決方案腳本 v41 - 畢業作品（標準Makefile回歸版）
+# 最終解決方案腳本 v42 - 畢業作品（最終防線版）
 # 作者: The Architect & Manus AI
-# 描述: 一個單一、完整的腳本，回歸了最標準、最可靠的Makefile寫法。
+# 描述: 一個單一、完整的腳本，放棄所有Makefile技巧，在預編譯階段親手準備好所有文件。
 #
 
 # --- 啟用嚴格模式，任何錯誤立即終止 ---
@@ -21,15 +21,18 @@ log_info "===== 開始執行預編譯配置 ====="
 
 # -------------------- 步驟 1：基礎變量定義 --------------------
 log_info "步驟 1：定義基礎變量..."
+ARCH="armv7"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
+# --- 關鍵：定義AdGuardHome核心最終應該在的位置 ---
+ADGUARD_CORE_DIR="package/base-files/files/usr/bin"
 log_success "基礎變量定義完成。"
 
 # -------------------- 步驟 2：創建必要的目錄 --------------------
 log_info "步驟 2：創建必要的目錄..."
-mkdir -p "$DTS_DIR" "$CUSTOM_PLUGINS_DIR"
+mkdir -p "$DTS_DIR" "$CUSTOM_PLUGINS_DIR" "$ADGUARD_CORE_DIR"
 log_success "目錄創建完成。"
 
 # -------------------- 步驟 3：寫入DTS文件 --------------------
@@ -325,59 +328,22 @@ else
     log_info "设备规则已存在，更新IMAGE_SIZE。"
 fi
 
-# -------------------- 步驟 6：AdGuardHome集成（標準Makefile方案） --------------------
-log_info "步驟 6：正在創建 AdGuardHome 核心的標準 Makefile..."
-PKG_DIR="package/custom/adguardhome-bin"
-mkdir -p "$PKG_DIR"
-cat > "$PKG_DIR/Makefile" <<'EOF'
-#
-# Copyright (C) 2024 The Architect & Manus AI
-# Licensed under MIT
-#
-include $(TOPDIR)/rules.mk
+# -------------------- 步驟 6：AdGuardHome集成（手動放置方案） --------------------
+log_info "步驟 6：正在手動下載並放置 AdGuardHome 核心..."
+AGH_URL=$(curl -fsSL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | \
+                  grep "browser_download_url.*linux_${ARCH}.tar.gz" | \
+                  cut -d '"' -f 4 )
+if [ -z "$AGH_URL" ]; then
+    log_error "獲取 AdGuardHome 下載鏈接失敗！"
+fi
 
-PKG_NAME:=adguardhome-bin
-# --- 關鍵：使用一個固定的、已知可用的版本號 ---
-PKG_VERSION:=v0.107.51
-PKG_RELEASE:=1
-
-# --- 關鍵：提供該版本對應的、準確的下載鏈接和哈希值 ---
-PKG_SOURCE_URL:=https://github.com/AdguardTeam/AdGuardHome/releases/download/$(PKG_VERSION )/AdGuardHome_linux_armv7.tar.gz
-PKG_HASH:=a76c1da7632cb45621a43485c3114a53633d163344881585252d4554435b11f2
-
-# PKG_BUILD_DIR 是OpenWrt自動處理的，我們無需干預
-PKG_BUILD_DIR := $(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
-
-include $(INCLUDE_DIR)/package.mk
-
-define Package/adguardhome-bin
-  SECTION:=net
-  CATEGORY:=Network
-  TITLE:=AdGuardHome Binary (specific version)
-  URL:=https://github.com/AdguardTeam/AdGuardHome
-  MAINTAINER:=The Architect
-  # --- 關鍵：依賴luci-app-adguardhome ，但不依賴wget，因為下載由make系統完成 ---
-  DEPENDS:=+luci-app-adguardhome
-endef
-
-define Package/adguardhome-bin/description
-  Provides a specific, pre-compiled binary for AdGuardHome.
-endef
-
-# Build/Prepare 和 Build/Compile 留空，使用OpenWrt的默認行為即可
-# OpenWrt會自動處理下載、校驗、解壓
-
-# --- 關鍵：install階段只做最純粹的複製工作 ---
-define Package/adguardhome-bin/install
-	$(INSTALL_DIR) $(1)/usr/bin
-	# --- 從OpenWrt自動解壓好的目錄中，複製核心文件 ---
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/AdGuardHome/AdGuardHome $(1)/usr/bin/
-endef
-
-# 執行打包
-$(eval $(call BuildPackage,adguardhome-bin))
-EOF
-log_success "AdGuardHome 標準 Makefile 創建成功！"
+log_info "獲取到下載鏈接: $AGH_URL"
+wget --show-progress -O /tmp/AdGuardHome.tar.gz "$AGH_URL"
+tar -xzf /tmp/AdGuardHome.tar.gz -C /tmp
+cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_CORE_DIR/"
+chmod +x "$ADGUARD_CORE_DIR/AdGuardHome"
+rm -rf /tmp/AdGuardHome*
+log_success "AdGuardHome 核心已成功放置到 $ADGUARD_CORE_DIR/AdGuardHome"
 
 # -------------------- 步驟 7：sirpdboy插件集成 --------------------
 log_info "步驟 7：集成sirpdboy插件..."
@@ -403,8 +369,8 @@ log_info "步驟 9：正在啟用必要的軟件包並生成最終配置..."
 CONFIG_FILE=".config.custom"
 rm -f $CONFIG_FILE
 
-# --- 啟用我們自定義的adguardhome-bin包，它會自動帶上luci-app-adguardhome ---
-echo "CONFIG_PACKAGE_adguardhome-bin=y" >> $CONFIG_FILE
+# --- 關鍵：我們只啟用luci界面，核心文件已經手動放置 ---
+echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> $CONFIG_FILE
 # --- 啟用sirpdboy插件 ---
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> $CONFIG_FILE
 # --- 啟用其他基礎依賴 ---
