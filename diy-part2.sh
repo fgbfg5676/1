@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v15：融合了用戶提供的優秀核心集成腳本
+# 最終解決方案腳本 v16：融合ChatGPT的專業優化建議，解決所有已知問題
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -7,16 +7,15 @@ log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
 # -------------------- 基础配置与变量定义 --------------------
-WGET_OPTS="-q --timeout=60 --tries=3 --retry-connrefused --connect-timeout=20 -L" # 增加了超時
+WGET_OPTS="-q --timeout=60 --tries=3 --retry-connrefused --connect-timeout=20 -L"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
-# --- 關鍵變更：使用標準的files目錄來確保打包成功 ---
 FILES_DIR="$(pwd)/files"
 
 # -------------------- 步驟 1：定義最終完美的DTS內容 --------------------
-# (這部分內容已驗證無誤，保持不變)
+# (保持不變)
 read -r -d '' FINAL_PERFECT_DTS <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
@@ -142,16 +141,14 @@ else
     log_info "设备规则已存在，更新IMAGE_SIZE"
 fi
 
-# -------------------- 步驟 5：集成插件（融合您的智慧） --------------------
+# -------------------- 步驟 5：集成插件（專業優化版） --------------------
 
-# --- AdGuardHome集成 (使用您的優秀腳本，並集成到標準打包流程) ---
+# --- AdGuardHome集成 ---
 log_info "集成AdGuardHome..."
 # 創建標準打包目錄
 mkdir -p "$FILES_DIR/usr/bin"
 mkdir -p "$FILES_DIR/etc/AdGuardHome"
-
-# 我們依然需要luci-app-adguardhome這個包，它提供了luci界面和init腳本
-./scripts/feeds install -p luci luci-app-adguardhome >/dev/null || log_error "安装luci-app-adguardhome失败"
+mkdir -p "$FILES_DIR/etc/config"
 
 # 使用您提供的、通過API獲取URL的健壯方法
 log_info "正在通過API獲取最新的AdGuardHome下載鏈接..."
@@ -161,28 +158,20 @@ ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repo
 
 if [ -n "$ADGUARD_URL" ]; then
     log_success "成功獲取下載鏈接: $ADGUARD_URL"
-    # 使用臨時文件來下載，而不是直接下載到目標目錄
     ADGUARD_TMP_TAR="/tmp/AdGuardHome.tar.gz"
     if wget $WGET_OPTS -O "$ADGUARD_TMP_TAR" "$ADGUARD_URL"; then
         log_success "AdGuardHome核心下載成功。"
-        # 解壓到臨時目錄
         TMP_DIR=$(mktemp -d)
         tar -zxf "$ADGUARD_TMP_TAR" -C "$TMP_DIR" --warning=no-unknown-keyword
-        
-        # 查找解壓后的AdGuardHome可執行文件
         ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
         if [ -n "$ADG_EXE" ]; then
             log_info "找到核心文件: $ADG_EXE"
-            # 複製可執行文件到標準的files打包目錄
             cp "$ADG_EXE" "$FILES_DIR/usr/bin/AdGuardHome" || log_error "AdGuardHome复制到files目錄失敗"
-            # 在files目錄中為核心添加可執行權限
             chmod +x "$FILES_DIR/usr/bin/AdGuardHome"
             log_success "AdGuardHome核心已成功複製並設置權限。"
         else
             log_error "在解壓的目錄中未找到AdGuardHome可執行文件！"
         fi
-        
-        # 清理臨時文件
         rm -rf "$TMP_DIR" "$ADGUARD_TMP_TAR"
     else
         log_error "AdGuardHome核心下載失敗！"
@@ -191,9 +180,11 @@ else
     log_error "通過API獲取AdGuardHome核心下載地址失敗！"
 fi
 
-# 將配置文件也放入 files 目錄
-log_info "將配置文件複製到標準打包目錄 $FILES_DIR/etc/AdGuardHome/"
+# --- 關鍵優化：創建持久化的YAML配置文件 ---
+log_info "創建持久化的AdGuardHome YAML配置文件..."
 cat > "$FILES_DIR/etc/AdGuardHome/AdGuardHome.yaml" <<EOF
+# 關鍵優化：指定工作目錄，確保數據持久化
+workdir: /etc/AdGuardHome
 bind_host: 0.0.0.0
 bind_port: 3000
 users:
@@ -210,24 +201,41 @@ filters:
   - enabled: true
     url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
 log:
-  file: /var/log/AdGuardHome.log
+  # 關鍵優化：指定日誌文件路徑 ，確保日誌持久化
+  file: /etc/AdGuardHome/AdGuardHome.log
 EOF
-grep -q "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
-log_success "AdGuardHome集成完成"
+log_success "YAML配置文件創建完成。"
 
+# --- 關鍵優化：創建對應的UCI配置文件，確保Luci能正確識別 ---
+log_info "創建AdGuardHome的UCI配置文件..."
+cat > "$FILES_DIR/etc/config/adguardhome" <<EOF
+config adguardhome 'global'
+	option adg_enabled '1'
+	option adg_forcedns '0'
+	option adg_bin_path '/usr/bin/AdGuardHome'
+	option adg_config_path '/etc/AdGuardHome/AdGuardHome.yaml'
+EOF
+log_success "UCI配置文件創建完成。"
 
-# --- sirpdboy插件集成 (完整版 ) ---
+# --- sirpdboy插件集成 ---
 log_info "集成sirpdboy插件..."
 mkdir -p "$CUSTOM_PLUGINS_DIR"
 if git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
-  grep -q "CONFIG_PACKAGE_luci-app-partexp=y" .config || echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
-  log_success "sirpdboy插件集成完成"
+  log_success "sirpdboy插件克隆成功"
 else
-  log_error "sirpdboy插件克隆失败"
+  log_error "sirpdboy插件克隆失敗"
 fi
 
 # -------------------- 步驟 6：最終配置 --------------------
+# --- 關鍵優化：將所有feeds操作集中到一起 ---
 log_info "更新和安裝所有feeds..."
 ./scripts/feeds update -a
 ./scripts/feeds install -a
+
+log_info "啟用必要的軟件包..."
+echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
+# ... 其他您需要的內核配置 ...
+log_success "軟件包啟用完成"
+
 log_success "所有配置完成 ，準備開始編譯..."
