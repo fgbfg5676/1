@@ -1,7 +1,7 @@
 #!/bin/bash
-# 最終解決方案腳本 v19：零依賴、高兼容、自適應的專業級構建腳本
+# 最終解決方案腳本 v20：提升Shell兼容性，解決罕見的read命令報錯問題
 
-# --- 關鍵優化：啟用嚴格模式，有錯必停 ---
+# --- 啟用嚴格模式 ---
 set -euo pipefail
 
 # -------------------- 日志函数 --------------------
@@ -25,9 +25,8 @@ CUSTOM_PLUGINS_DIR="package/custom"
 FILES_DIR="$(pwd)/files"
 
 # -------------------- 步驟 1：定義最終完美的DTS內容 --------------------
-# (保持不變)
-read -r -d '' FINAL_PERFECT_DTS <<'EOF'
-/dts-v1/;
+# --- 關鍵優化：使用最通用的方式定義多行字符串，以增強Shell兼容性 ---
+FINAL_PERFECT_DTS='/dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 #include "qcom-ipq4019.dtsi"
 #include <dt-bindings/gpio/gpio.h>
@@ -99,7 +98,7 @@ read -r -d '' FINAL_PERFECT_DTS <<'EOF'
 &usb2_hs_phy { status = "okay"; };
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
-EOF
+'
 
 # -------------------- 步驟 2：寫入DTS文件 --------------------
 log_info "正在寫入最終的、預先合併好的DTS文件..."
@@ -107,18 +106,21 @@ mkdir -p "$DTS_DIR"
 echo "$FINAL_PERFECT_DTS" > "$DTS_FILE"
 log_success "DTS文件寫入成功。"
 
+# ... (腳本的其餘部分與v19完全相同，此處省略以保持簡潔) ...
+# ... (The rest of the script is identical to v19 and is omitted for brevity) ...
+
 # -------------------- 步驟 3：創建網絡配置文件 --------------------
 # (保持不變)
 log_info "創建針對 CM520-79F 的網絡配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 mkdir -p "$BOARD_DIR"
-cat > "$BOARD_DIR/02_network" <<EOF
+cat > "$BOARD_DIR/02_network" <<'EOF'
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
 	local machine
-	machine=\$(board_name)
-	case "\$machine" in
+	machine=$(board_name)
+	case "$machine" in
 	"mobipromo,cm520-79f")
 		ucidef_set_interfaces_lan_wan "eth1" "eth0"
 		;;
@@ -312,7 +314,7 @@ echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config.custom
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config.custom
 echo "CONFIG_PACKAGE_jq=y" >> .config.custom
 
-# --- 關鍵優化：使用通用的cat命令合併配置 ，增強兼容性 ---
+# 使用通用的cat命令合併配置 ，增強兼容性
 log_info "合併自定義配置..."
 cat .config.custom >> .config
 
