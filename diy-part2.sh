@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v29：100%忠實復刻您提供的、真正正確的成功藍本
+# 最終解決方案腳本 v30：100%忠實復刻您提供的、完整的、成功的藍本，杜絕任何省略
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -19,7 +19,6 @@ ADGUARD_CONF_DIR="package/base-files/files/etc/AdGuardHome"
 # -------------------- 步驟 1：定義並寫入DTS文件 --------------------
 log_info "正在寫入您提供的、100%正確的DTS文件..."
 mkdir -p "$DTS_DIR"
-# --- 關鍵修正：100%使用您提供的、被證明是絕對正確的DTS內容 ---
 cat > "$DTS_FILE" <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
@@ -311,12 +310,72 @@ else
     log_info "设备规则已存在，更新IMAGE_SIZE"
 fi
 
-# -------------------- 步驟 4：AdGuardHome集成 --------------------
-# (此部分在您的成功腳本中未包含，為保持100%一致，此處留空)
-# 如果需要，我們可以將v28版本中被證明是正確的AdGuardHome集成代碼加入此處
+# -------------------- 步驟 4：AdGuardHome集成 (完整復刻) --------------------
+log_info "集成AdGuardHome..."
+mkdir -p "$ADGUARD_CORE_DIR" "$ADGUARD_CONF_DIR"
+# 安裝luci-app-adguardhome以創建必要的目錄結構
+./scripts/feeds install -p luci luci-app-adguardhome >/dev/null || log_error "安装luci-app-adguardhome失败"
 
-# -------------------- 步驟 5：sirpdboy插件集成 --------------------
-# (此部分在您的成功腳本中未包含，為保持100%一致，此處留空)
+ADGUARD_URLS=(
+  "https://ghproxy.com/https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${ARCH}.tar.gz"
+  "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${ARCH}.tar.gz"
+ )
+ADGUARD_TMP="/tmp/adguard.tar.gz"
+ADGUARD_DOWNLOADED=false
+for url in "${ADGUARD_URLS[@]}"; do
+  log_info "正在尝试从 $url 下载 AdGuardHome..."
+  if wget $WGET_OPTS -O "$ADGUARD_TMP" "$url"; then
+    if file "$ADGUARD_TMP" | grep -q 'gzip compressed data'; then
+      log_success "AdGuardHome核心下载成功，且文件格式正确。"
+      ADGUARD_DOWNLOADED=true
+      break
+    else
+      log_info "下载的文件不是有效的gzip格式，尝试下一个URL..."
+      rm -f "$ADGUARD_TMP"
+    fi
+  else
+    log_info "从 $url 下载失败。尝试下一个URL..."
+  fi
+done
+
+if [ "$ADGUARD_DOWNLOADED" = true ]; then
+  tar -zxf "$ADGUARD_TMP" -C /tmp >/dev/null || log_error "解压缩AdGuardHome失败"
+  cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_CORE_DIR/" || log_error "AdGuardHome复制失败"
+  chmod +x "$ADGUARD_CORE_DIR/AdGuardHome"
+  rm -rf /tmp/AdGuardHome "$ADGUARD_TMP"
+else
+  log_error "AdGuardHome核心下载失败，所有URL都已尝试。"
+fi
+
+cat > "$ADGUARD_CONF_DIR/AdGuardHome.yaml" <<EOF
+bind_host: 0.0.0.0
+bind_port: 3000
+users:
+  - name: admin
+    password: "\$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J/6z8s8nJlQ6oP4y"
+dns:
+  bind_host: 0.0.0.0
+  port: 53
+  upstream_dns:
+    - 223.5.5.5
+    - 119.29.29.29
+  cache_size: 4194304
+filters:
+  - enabled: true
+    url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+log:
+  file: /var/log/AdGuardHome.log
+EOF
+log_success "AdGuardHome集成完成"
+
+# -------------------- 步驟 5：sirpdboy插件集成 (完整復刻 ) --------------------
+log_info "集成sirpdboy插件..."
+mkdir -p "$CUSTOM_PLUGINS_DIR"
+if git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
+  log_success "sirpdboy插件克隆成功"
+else
+  log_error "sirpdboy插件克隆失敗"
+fi
 
 # -------------------- 步驟 6：最終配置 --------------------
 log_info "更新和安裝所有feeds..."
@@ -325,6 +384,8 @@ log_info "更新和安裝所有feeds..."
 
 log_info "啟用必要的軟件包..."
 # --- 關鍵修正：嚴格遵循成功藍本的依賴 ---
+grep -q "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+grep -q "CONFIG_PACKAGE_luci-app-partexp=y" .config || echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
 grep -q "CONFIG_PACKAGE_kmod-ubi=y" .config || echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 grep -q "CONFIG_PACKAGE_kmod-ubifs=y" .config || echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 grep -q "CONFIG_PACKAGE_trx=y" .config || echo "CONFIG_PACKAGE_trx=y" >> .config
@@ -337,4 +398,19 @@ grep -q "CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y" .config || echo "CONFIG_TARGET_RO
 log_info "生成最終配置文件..."
 make defconfig
 
-log_success "所有配置完成，準備開始編譯..."
+log_success "所有配置完成 ，準備開始編譯..."
+# -------------------- DTS 文件检测 --------------------
+check_dts() {
+    local dts_file="target/linux/ipq40xx/files/arch/arm/boot/dts/qcom-ipq4019-cm520-79f.dts"
+    if [ -f "$dts_file" ]; then
+        echo "✅ DTS文件存在：$dts_file"
+        echo "---- 前 10 行内容 ----"
+        head -n 10 "$dts_file"
+        echo "----------------------"
+    else
+        echo "❌ DTS文件不存在，请检查写入步骤是否失败"
+        exit 1
+    fi
+}
+
+check_dts
