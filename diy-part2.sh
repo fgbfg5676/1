@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v23：移除所有調試日誌，恢復專業、簡潔的生產形態
+# 最終解決方案腳本 v24：在編譯前增加最終完整性校驗，確保萬無一失
 
 # --- 啟用嚴格模式 ---
 set -euo pipefail
@@ -262,4 +262,13 @@ echo "CONFIG_PACKAGE_jq=y" >> .config.custom
 cat .config.custom >> .config
 make defconfig
 
-log_success "所有預編譯步驟均已成功完成！準備開始編譯..."
+log_success "所有預編譯步驟均已成功完成！"
+
+# --- 關鍵優化：在編譯前增加最終完整性校驗 ---
+log_info "正在執行最終完整性校驗..."
+[ -f "$FILES_DIR/usr/bin/AdGuardHome" ] || log_error "最終校驗失敗：AdGuardHome核心文件不存在！"
+[ -x "$FILES_DIR/usr/bin/AdGuardHome" ] || log_error "最終校驗失敗：AdGuardHome核心文件沒有可執行權限！"
+[ -f "$DTS_FILE" ] || log_error "最終校驗失敗：DTS文件不存在！"
+log_success "最終完整性校驗通過！所有關鍵文件均已就位 。"
+
+log_info "準備開始編譯..."
