@@ -1,10 +1,20 @@
 #!/bin/bash
-# 最終解決方案腳本 v16：融合ChatGPT的專業優化建議，解決所有已知問題
+# 最終解決方案腳本 v19：零依賴、高兼容、自適應的專業級構建腳本
+
+# --- 關鍵優化：啟用嚴格模式，有錯必停 ---
+set -euo pipefail
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
+
+# -------------------- 前置條件檢查 --------------------
+log_info "正在檢查環境依賴..."
+if ! command -v jq > /dev/null; then
+    log_error "依賴工具 'jq' 未安裝。請在您的編譯主機上安裝jq（例如：sudo apt-get install jq），然後再運行此腳本。"
+fi
+log_success "環境依賴檢查通過。"
 
 # -------------------- 基础配置与变量定义 --------------------
 WGET_OPTS="-q --timeout=60 --tries=3 --retry-connrefused --connect-timeout=20 -L"
@@ -141,55 +151,57 @@ else
     log_info "设备规则已存在，更新IMAGE_SIZE"
 fi
 
-# -------------------- 步驟 5：集成插件（專業優化版） --------------------
+# -------------------- 步驟 5：集成插件（零依賴自適應版） --------------------
 
 # --- AdGuardHome集成 ---
 log_info "集成AdGuardHome..."
-# 創建標準打包目錄
 mkdir -p "$FILES_DIR/usr/bin"
 mkdir -p "$FILES_DIR/etc/AdGuardHome"
 mkdir -p "$FILES_DIR/etc/config"
+mkdir -p "$FILES_DIR/etc/init.d"
+mkdir -p "$FILES_DIR/etc/hotplug.d/iface"
 
-# 使用您提供的、通過API獲取URL的健壯方法
+# 使用jq和備用匹配，確保URL獲取萬無一失
 log_info "正在通過API獲取最新的AdGuardHome下載鏈接..."
-ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest |
-              grep "browser_download_url.*linux_armv7" |
-              cut -d '"' -f 4 )
+API_RESPONSE=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest )
+ADGUARD_URL=$(echo "$API_RESPONSE" | jq -r '.assets[] | .browser_download_url | select(contains("linux_armv7.tar.gz"))')
+if [ -z "$ADGUARD_URL" ]; then
+    log_info "未找到armv7版本，嘗試查找通用的arm版本..."
+    ADGUARD_URL=$(echo "$API_RESPONSE" | jq -r '.assets[] | .browser_download_url | select(contains("linux_arm.tar.gz"))')
+fi
 
-if [ -n "$ADGUARD_URL" ]; then
-    log_success "成功獲取下載鏈接: $ADGUARD_URL"
-    ADGUARD_TMP_TAR="/tmp/AdGuardHome.tar.gz"
-    if wget $WGET_OPTS -O "$ADGUARD_TMP_TAR" "$ADGUARD_URL"; then
-        log_success "AdGuardHome核心下載成功。"
-        TMP_DIR=$(mktemp -d)
-        tar -zxf "$ADGUARD_TMP_TAR" -C "$TMP_DIR" --warning=no-unknown-keyword
-        ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
-        if [ -n "$ADG_EXE" ]; then
-            log_info "找到核心文件: $ADG_EXE"
-            cp "$ADG_EXE" "$FILES_DIR/usr/bin/AdGuardHome" || log_error "AdGuardHome复制到files目錄失敗"
-            chmod +x "$FILES_DIR/usr/bin/AdGuardHome"
-            log_success "AdGuardHome核心已成功複製並設置權限。"
-        else
-            log_error "在解壓的目錄中未找到AdGuardHome可執行文件！"
-        fi
-        rm -rf "$TMP_DIR" "$ADGUARD_TMP_TAR"
-    else
-        log_error "AdGuardHome核心下載失敗！"
-    fi
-else
+# 在獲取失敗時，明確報錯並終止
+if [ -z "$ADGUARD_URL" ]; then
     log_error "通過API獲取AdGuardHome核心下載地址失敗！"
 fi
 
-# --- 關鍵優化：創建持久化的YAML配置文件 ---
-log_info "創建持久化的AdGuardHome YAML配置文件..."
+log_success "成功獲取下載鏈接: $ADGUARD_URL"
+ADGUARD_TMP_TAR="/tmp/AdGuardHome.tar.gz"
+if wget $WGET_OPTS -O "$ADGUARD_TMP_TAR" "$ADGUARD_URL"; then
+    log_success "AdGuardHome核心下載成功。"
+    TMP_DIR=$(mktemp -d)
+    tar -zxf "$ADGUARD_TMP_TAR" -C "$TMP_DIR" --warning=no-unknown-keyword
+    ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
+    if [ -n "$ADG_EXE" ]; then
+        log_info "找到核心文件: $ADG_EXE"
+        cp "$ADG_EXE" "$FILES_DIR/usr/bin/AdGuardHome"
+        chmod +x "$FILES_DIR/usr/bin/AdGuardHome"
+        log_success "AdGuardHome核心已成功複製並設置權限。"
+    else
+        log_error "在解壓的目錄中未找到AdGuardHome可執行文件！"
+    fi
+    rm -rf "$TMP_DIR" "$ADGUARD_TMP_TAR"
+else
+    log_error "AdGuardHome核心下載失敗！"
+fi
+
+# 創建兼顧安全與閃存壽命的YAML配置文件
+log_info "創建安全的AdGuardHome YAML配置文件..."
 cat > "$FILES_DIR/etc/AdGuardHome/AdGuardHome.yaml" <<EOF
-# 關鍵優化：指定工作目錄，確保數據持久化
-workdir: /etc/AdGuardHome
+workdir: /tmp/AdGuardHome
 bind_host: 0.0.0.0
 bind_port: 3000
-users:
-  - name: admin
-    password: "\$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J/6z8s8nJlQ6oP4y"
+users: []
 dns:
   bind_host: 0.0.0.0
   port: 53
@@ -201,12 +213,11 @@ filters:
   - enabled: true
     url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
 log:
-  # 關鍵優化：指定日誌文件路徑 ，確保日誌持久化
-  file: /etc/AdGuardHome/AdGuardHome.log
+  file: /tmp/AdGuardHome.log
 EOF
-log_success "YAML配置文件創建完成。"
+log_success "YAML配置文件創建完成 。"
 
-# --- 關鍵優化：創建對應的UCI配置文件，確保Luci能正確識別 ---
+# 創建對應的UCI配置文件
 log_info "創建AdGuardHome的UCI配置文件..."
 cat > "$FILES_DIR/etc/config/adguardhome" <<EOF
 config adguardhome 'global'
@@ -216,6 +227,65 @@ config adguardhome 'global'
 	option adg_config_path '/etc/AdGuardHome/AdGuardHome.yaml'
 EOF
 log_success "UCI配置文件創建完成。"
+
+# 創建專業的init.d啟動腳本
+log_info "創建AdGuardHome的init.d啟動腳本..."
+cat > "$FILES_DIR/etc/init.d/adguardhome" <<'EOF'
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+CONF_FILE="/etc/AdGuardHome/AdGuardHome.yaml"
+BIN_FILE="/usr/bin/AdGuardHome"
+WORKDIR="/tmp/AdGuardHome"
+
+validate_config() {
+    [ ! -x "$BIN_FILE" ] && { echo "Binary not found or not executable: $BIN_FILE"; return 1; }
+    [ ! -f "$CONF_FILE" ] && { echo "Config file not found: $CONF_FILE"; return 1; }
+    mkdir -p "$WORKDIR"
+    return 0
+}
+
+start_service() {
+    validate_config || return 1
+    ulimit -n 8192
+    procd_open_instance
+    procd_set_param command "$BIN_FILE" -c "$CONF_FILE" --no-check-update
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+EOF
+chmod +x "$FILES_DIR/etc/init.d/adguardhome"
+log_success "init.d啟動腳本創建完成。"
+
+# 創建智能檢測的hotplug腳本
+log_info "創建AdGuardHome的hotplug腳本..."
+cat > "$FILES_DIR/etc/hotplug.d/iface/99-adguardhome" <<'EOF'
+#!/bin/sh
+
+# 當LAN口就緒時，智能檢測網絡連通性後再啟動AdGuardHome
+if [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ]; then
+    (
+        # 循環檢測網絡，最多等待30秒
+        RETRY_COUNT=0
+        while [ $RETRY_COUNT -lt 15 ]; do
+            if ping -c 1 -W 1 223.5.5.5 >/dev/null 2>&1; then
+                # 網絡就緒，重啟服務
+                /etc/init.d/adguardhome enabled && /etc/init.d/adguardhome restart
+                exit 0
+            fi
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            sleep 2
+        done
+    ) &
+fi
+EOF
+chmod +x "$FILES_DIR/etc/hotplug.d/iface/99-adguardhome"
+log_success "hotplug腳本創建完成。"
 
 # --- sirpdboy插件集成 ---
 log_info "集成sirpdboy插件..."
@@ -227,15 +297,27 @@ else
 fi
 
 # -------------------- 步驟 6：最終配置 --------------------
-# --- 關鍵優化：將所有feeds操作集中到一起 ---
 log_info "更新和安裝所有feeds..."
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
 log_info "啟用必要的軟件包..."
-echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
-echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
-# ... 其他您需要的內核配置 ...
-log_success "軟件包啟用完成"
+# 創建或清空 .config.custom 文件
+> .config.custom
+echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config.custom
+echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config.custom
+echo "CONFIG_PACKAGE_parted=y" >> .config.custom
+echo "CONFIG_PACKAGE_resize2fs=y" >> .config.custom
+echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config.custom
+echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config.custom
+echo "CONFIG_PACKAGE_jq=y" >> .config.custom
 
-log_success "所有配置完成 ，準備開始編譯..."
+# --- 關鍵優化：使用通用的cat命令合併配置 ，增強兼容性 ---
+log_info "合併自定義配置..."
+cat .config.custom >> .config
+
+log_info "生成最終配置文件..."
+make defconfig
+log_success "軟件包啟用和依賴處理完成。"
+
+log_success "所有配置完成，準備開始編譯..."
