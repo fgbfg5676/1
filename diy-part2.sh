@@ -373,7 +373,8 @@ define Build/Prepare
 		exit 1; \
 	fi
 	
-	wget --show-progress -O AdGuardHome.tar.gz "$$AGH_URL"
+	# 用 curl -# 显示进度条下载
+	curl -fSL -# -o AdGuardHome.tar.gz "$$AGH_URL"
 	tar -xzf AdGuardHome.tar.gz
 
 	if [ ! -f "$(PKG_BUILD_DIR)/AdGuardHome/AdGuardHome" ]; then \
