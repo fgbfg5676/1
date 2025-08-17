@@ -343,32 +343,57 @@ mkdir -p "$ADGUARD_CORE_DIR" "$ADGUARD_CONF_DIR"
 ADGUARD_URLS=(
   "https://ghproxy.com/https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${ARCH}.tar.gz"
   "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${ARCH}.tar.gz"
- )
+)
 ADGUARD_TMP="/tmp/adguard.tar.gz"
 ADGUARD_DOWNLOADED=false
-for url in "${ADGUARD_URLS[@]}"; do
-  log_info "正在尝试从 $url 下载 AdGuardHome..."
-  if wget $WGET_OPTS -O "$ADGUARD_TMP" "$url"; then
-    if file "$ADGUARD_TMP" | grep -q 'gzip compressed data'; then
-      log_success "AdGuardHome核心下载成功，且文件格式正确。"
-      ADGUARD_DOWNLOADED=true
-      break
+
+download_with_size() {
+    local url="$1"
+    local output="$2"
+    local size=""
+
+    # 尝试获取文件大小
+    size=$(curl -sI "$url" 2>/dev/null | grep -i Content-Length | awk '{printf "%.2f MB", $2/1024/1024}')
+    if [ -n "$size" ]; then
+        log_info "准备下载：$url （大小：$size）"
     else
-      log_info "下载的文件不是有效的gzip格式，尝试下一个URL..."
-      rm -f "$ADGUARD_TMP"
+        log_info "准备下载：$url （大小未知）"
     fi
-  else
-    log_info "从 $url 下载失败。尝试下一个URL..."
-  fi
+
+    # 执行下载并显示进度
+    if wget --show-progress -O "$output" "$url"; then
+        local actual_size
+        actual_size=$(du -h "$output" | cut -f1)
+        log_info "下载完成，实际文件大小：$actual_size"
+        return 0
+    else
+        return 1
+    fi
+}
+
+for url in "${ADGUARD_URLS[@]}"; do
+    log_info "正在尝试从 $url 下载 AdGuardHome..."
+    if download_with_size "$url" "$ADGUARD_TMP"; then
+        if file "$ADGUARD_TMP" | grep -q 'gzip compressed data'; then
+            log_success "AdGuardHome核心下载成功，且文件格式正确。"
+            ADGUARD_DOWNLOADED=true
+            break
+        else
+            log_info "下载的文件不是有效的gzip格式，尝试下一个URL..."
+            rm -f "$ADGUARD_TMP"
+        fi
+    else
+        log_info "从 $url 下载失败。尝试下一个URL..."
+    fi
 done
 
 if [ "$ADGUARD_DOWNLOADED" = true ]; then
-  tar -zxf "$ADGUARD_TMP" -C /tmp >/dev/null || log_error "解压缩AdGuardHome失败"
-  cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_CORE_DIR/" || log_error "AdGuardHome复制失败"
-  chmod +x "$ADGUARD_CORE_DIR/AdGuardHome"
-  rm -rf /tmp/AdGuardHome "$ADGUARD_TMP"
+    tar -zxf "$ADGUARD_TMP" -C /tmp >/dev/null || log_error "解压缩AdGuardHome失败"
+    cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_CORE_DIR/" || log_error "AdGuardHome复制失败"
+    chmod +x "$ADGUARD_CORE_DIR/AdGuardHome"
+    rm -rf /tmp/AdGuardHome "$ADGUARD_TMP"
 else
-  log_error "AdGuardHome核心下载失败，所有URL都已尝试。"
+    log_error "AdGuardHome核心下载失败，所有URL都已尝试。"
 fi
 
 cat > "$ADGUARD_CONF_DIR/AdGuardHome.yaml" <<EOF
@@ -390,7 +415,9 @@ filters:
 log:
   file: /var/log/AdGuardHome.log
 EOF
+
 log_success "AdGuardHome集成完成"
+
 
 # -------------------- 步驟 5：sirpdboy插件集成 (完整復刻 ) --------------------
 log_info "集成sirpdboy插件..."
