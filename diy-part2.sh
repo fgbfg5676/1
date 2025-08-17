@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v24：在編譯前增加最終完整性校驗，確保萬無一失
+# 最終解決方案腳本 v25：補全DTS文件中缺失的交換機配置，解決最後的編譯錯誤
 
 # --- 啟用嚴格模式 ---
 set -euo pipefail
@@ -36,6 +36,7 @@ mkdir -p "$FILES_DIR/etc/hotplug.d/iface"
 mkdir -p "$CUSTOM_PLUGINS_DIR"
 
 log_info "正在寫入DTS文件..."
+# --- 關鍵修正：補全了缺失的 &switch, &swport3, &swport4, &swport5 配置 ---
 cat > "$DTS_FILE" <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
@@ -109,6 +110,10 @@ cat > "$DTS_FILE" <<'EOF'
 &usb2_hs_phy { status = "okay"; };
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
+&switch { status = "okay"; };
+&swport3 { status = "okay"; label = "lan2"; };
+&swport4 { status = "okay"; label = "lan1"; };
+&swport5 { status = "okay"; };
 EOF
 
 log_info "正在寫入網絡配置文件..."
@@ -264,7 +269,6 @@ make defconfig
 
 log_success "所有預編譯步驟均已成功完成！"
 
-# --- 關鍵優化：在編譯前增加最終完整性校驗 ---
 log_info "正在執行最終完整性校驗..."
 [ -f "$FILES_DIR/usr/bin/AdGuardHome" ] || log_error "最終校驗失敗：AdGuardHome核心文件不存在！"
 [ -x "$FILES_DIR/usr/bin/AdGuardHome" ] || log_error "最終校驗失敗：AdGuardHome核心文件沒有可執行權限！"
