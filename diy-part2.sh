@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v21：回歸最安全的DTS定義方式，解決最後的語法錯誤
+# 調試腳本 v22：逐行驗證，找出真相
 
 # --- 啟用嚴格模式 ---
 set -euo pipefail
@@ -9,24 +9,41 @@ log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
-# -------------------- 前置條件檢查 --------------------
-log_info "正在檢查環境依賴..."
-if ! command -v jq > /dev/null; then
-    log_error "依賴工具 'jq' 未安裝。請在您的編譯主機上安裝jq（例如：sudo apt-get install jq），然後再運行此腳本。"
-fi
-log_success "環境依賴檢查通過。"
+# -------------------- 逐行調試開始 --------------------
 
-# -------------------- 基础配置与变量定义 --------------------
+log_info "步驟 0：腳本開始執行。"
+
+# --- 檢查點 1：環境依賴 ---
+log_info "步驟 1：正在檢查環境依賴..."
+if ! command -v jq > /dev/null; then
+    log_error "依賴工具 'jq' 未安裝。"
+fi
+log_success "步驟 1：環境依賴檢查通過。"
+
+# --- 檢查點 2：變量定義 ---
+log_info "步驟 2：正在定義基礎變量..."
 WGET_OPTS="-q --timeout=60 --tries=3 --retry-connrefused --connect-timeout=20 -L"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
 FILES_DIR="$(pwd)/files"
+log_success "步驟 2：基礎變量定義完成。"
 
-# -------------------- 步驟 1：定義最終完美的DTS內容 --------------------
-# --- 關鍵修正：回歸到v19版本中最安全、最不會引起歧義的read命令 ---
-read -r -d '' FINAL_PERFECT_DTS <<'EOF'
+# --- 檢查點 3：創建目錄 ---
+log_info "步驟 3：正在創建必要的目錄..."
+mkdir -p "$DTS_DIR"
+mkdir -p "$FILES_DIR/usr/bin"
+mkdir -p "$FILES_DIR/etc/AdGuardHome"
+mkdir -p "$FILES_DIR/etc/config"
+mkdir -p "$FILES_DIR/etc/init.d"
+mkdir -p "$FILES_DIR/etc/hotplug.d/iface"
+mkdir -p "$CUSTOM_PLUGINS_DIR"
+log_success "步驟 3：目錄創建完成。"
+
+# --- 檢查點 4：DTS文件寫入 ---
+log_info "步驟 4：正在寫入DTS文件..."
+cat > "$DTS_FILE" <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 #include "qcom-ipq4019.dtsi"
@@ -100,17 +117,11 @@ read -r -d '' FINAL_PERFECT_DTS <<'EOF'
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
+log_success "步驟 4：DTS文件寫入成功。"
 
-# -------------------- 步驟 2：寫入DTS文件 --------------------
-log_info "正在寫入最終的、預先合併好的DTS文件..."
-mkdir -p "$DTS_DIR"
-echo "$FINAL_PERFECT_DTS" > "$DTS_FILE"
-log_success "DTS文件寫入成功。"
-
-# -------------------- 步驟 3：創建網絡配置文件 --------------------
-log_info "創建針對 CM520-79F 的網絡配置文件..."
+# --- 檢查點 5：網絡配置文件寫入 ---
+log_info "步驟 5：正在寫入網絡配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
-mkdir -p "$BOARD_DIR"
 cat > "$BOARD_DIR/02_network" <<'EOF'
 #!/bin/sh
 . /lib/functions/system.sh
@@ -125,10 +136,10 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-log_success "網絡配置文件創建完成"
+log_success "步驟 5：網絡配置文件寫入成功。"
 
-# -------------------- 步驟 4：設備規則配置 --------------------
-log_info "配置設備規則..."
+# --- 檢查點 6：設備規則配置 ---
+log_info "步驟 6：正在配置設備規則..."
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
 
@@ -143,53 +154,40 @@ define Device/mobipromo_cm520-79f
 endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
-    log_success "设备规则添加完成"
 else
     sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
-    log_info "设备规则已存在，更新IMAGE_SIZE"
 fi
+log_success "步驟 6：設備規則配置完成。"
 
-# -------------------- 步驟 5：集成插件（零依賴自適應版） --------------------
-log_info "集成AdGuardHome..."
-mkdir -p "$FILES_DIR/usr/bin"
-mkdir -p "$FILES_DIR/etc/AdGuardHome"
-mkdir -p "$FILES_DIR/etc/config"
-mkdir -p "$FILES_DIR/etc/init.d"
-mkdir -p "$FILES_DIR/etc/hotplug.d/iface"
-
-log_info "正在通過API獲取最新的AdGuardHome下載鏈接..."
+# --- 檢查點 7：AdGuardHome下載 ---
+log_info "步驟 7：正在下載AdGuardHome..."
 API_RESPONSE=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest )
 ADGUARD_URL=$(echo "$API_RESPONSE" | jq -r '.assets[] | .browser_download_url | select(contains("linux_armv7.tar.gz"))')
 if [ -z "$ADGUARD_URL" ]; then
-    log_info "未找到armv7版本，嘗試查找通用的arm版本..."
     ADGUARD_URL=$(echo "$API_RESPONSE" | jq -r '.assets[] | .browser_download_url | select(contains("linux_arm.tar.gz"))')
 fi
-
 if [ -z "$ADGUARD_URL" ]; then
-    log_error "通過API獲取AdGuardHome核心下載地址失敗！"
+    log_error "獲取AdGuardHome下載地址失敗！"
 fi
-
-log_success "成功獲取下載鏈接: $ADGUARD_URL"
 ADGUARD_TMP_TAR="/tmp/AdGuardHome.tar.gz"
-if wget $WGET_OPTS -O "$ADGUARD_TMP_TAR" "$ADGUARD_URL"; then
-    log_success "AdGuardHome核心下載成功。"
-    TMP_DIR=$(mktemp -d)
-    tar -zxf "$ADGUARD_TMP_TAR" -C "$TMP_DIR" --warning=no-unknown-keyword
-    ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
-    if [ -n "$ADG_EXE" ]; then
-        log_info "找到核心文件: $ADG_EXE"
-        cp "$ADG_EXE" "$FILES_DIR/usr/bin/AdGuardHome"
-        chmod +x "$FILES_DIR/usr/bin/AdGuardHome"
-        log_success "AdGuardHome核心已成功複製並設置權限。"
-    else
-        log_error "在解壓的目錄中未找到AdGuardHome可執行文件！"
-    fi
-    rm -rf "$TMP_DIR" "$ADGUARD_TMP_TAR"
-else
-    log_error "AdGuardHome核心下載失敗！"
-fi
+wget $WGET_OPTS -O "$ADGUARD_TMP_TAR" "$ADGUARD_URL"
+log_success "步驟 7：AdGuardHome下載完成。"
 
-log_info "創建安全的AdGuardHome YAML配置文件..."
+# --- 檢查點 8：AdGuardHome解壓與安裝 ---
+log_info "步驟 8：正在解壓與安裝AdGuardHome..."
+TMP_DIR=$(mktemp -d)
+tar -zxf "$ADGUARD_TMP_TAR" -C "$TMP_DIR" --warning=no-unknown-keyword
+ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
+if [ -z "$ADG_EXE" ]; then
+    log_error "未找到AdGuardHome可執行文件！"
+fi
+cp "$ADG_EXE" "$FILES_DIR/usr/bin/AdGuardHome"
+chmod +x "$FILES_DIR/usr/bin/AdGuardHome"
+rm -rf "$TMP_DIR" "$ADGUARD_TMP_TAR"
+log_success "步驟 8：AdGuardHome解壓與安裝完成。"
+
+# --- 檢查點 9：寫入YAML配置 ---
+log_info "步驟 9：正在寫入YAML配置..."
 cat > "$FILES_DIR/etc/AdGuardHome/AdGuardHome.yaml" <<EOF
 workdir: /tmp/AdGuardHome
 bind_host: 0.0.0.0
@@ -208,9 +206,10 @@ filters:
 log:
   file: /tmp/AdGuardHome.log
 EOF
-log_success "YAML配置文件創建完成 。"
+log_success "步驟 9：YAML配置寫入完成 。"
 
-log_info "創建AdGuardHome的UCI配置文件..."
+# --- 檢查點 10：寫入UCI配置 ---
+log_info "步驟 10：正在寫入UCI配置..."
 cat > "$FILES_DIR/etc/config/adguardhome" <<EOF
 config adguardhome 'global'
 	option adg_enabled '1'
@@ -218,27 +217,24 @@ config adguardhome 'global'
 	option adg_bin_path '/usr/bin/AdGuardHome'
 	option adg_config_path '/etc/AdGuardHome/AdGuardHome.yaml'
 EOF
-log_success "UCI配置文件創建完成。"
+log_success "步驟 10：UCI配置寫入完成。"
 
-log_info "創建AdGuardHome的init.d啟動腳本..."
+# --- 檢查點 11：寫入init.d腳本 ---
+log_info "步驟 11：正在寫入init.d腳本..."
 cat > "$FILES_DIR/etc/init.d/adguardhome" <<'EOF'
 #!/bin/sh /etc/rc.common
-
 START=99
 STOP=10
 USE_PROCD=1
-
 CONF_FILE="/etc/AdGuardHome/AdGuardHome.yaml"
 BIN_FILE="/usr/bin/AdGuardHome"
 WORKDIR="/tmp/AdGuardHome"
-
 validate_config() {
-    [ ! -x "$BIN_FILE" ] && { echo "Binary not found or not executable: $BIN_FILE"; return 1; }
-    [ ! -f "$CONF_FILE" ] && { echo "Config file not found: $CONF_FILE"; return 1; }
+    [ ! -x "$BIN_FILE" ] && { return 1; }
+    [ ! -f "$CONF_FILE" ] && { return 1; }
     mkdir -p "$WORKDIR"
     return 0
 }
-
 start_service() {
     validate_config || return 1
     ulimit -n 8192
@@ -251,12 +247,12 @@ start_service() {
 }
 EOF
 chmod +x "$FILES_DIR/etc/init.d/adguardhome"
-log_success "init.d啟動腳本創建完成。"
+log_success "步驟 11：init.d腳本寫入完成。"
 
-log_info "創建AdGuardHome的hotplug腳本..."
+# --- 檢查點 12：寫入hotplug腳本 ---
+log_info "步驟 12：正在寫入hotplug腳本..."
 cat > "$FILES_DIR/etc/hotplug.d/iface/99-adguardhome" <<'EOF'
 #!/bin/sh
-
 if [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ]; then
     (
         RETRY_COUNT=0
@@ -272,22 +268,23 @@ if [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ]; then
 fi
 EOF
 chmod +x "$FILES_DIR/etc/hotplug.d/iface/99-adguardhome"
-log_success "hotplug腳本創建完成。"
+log_success "步驟 12：hotplug腳本寫入完成。"
 
-log_info "集成sirpdboy插件..."
-mkdir -p "$CUSTOM_PLUGINS_DIR"
-if git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
-  log_success "sirpdboy插件克隆成功"
-else
+# --- 檢查點 13：克隆sirpdboy插件 ---
+log_info "步驟 13：正在克隆sirpdboy插件..."
+if ! git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
   log_error "sirpdboy插件克隆失敗"
 fi
+log_success "步驟 13：sirpdboy插件克隆完成 。"
 
-# -------------------- 步驟 6：最終配置 --------------------
-log_info "更新和安裝所有feeds..."
+# --- 檢查點 14：Feeds操作 ---
+log_info "步驟 14：正在更新和安裝feeds..."
 ./scripts/feeds update -a
 ./scripts/feeds install -a
+log_success "步驟 14：Feeds操作完成。"
 
-log_info "啟用必要的軟件包..."
+# --- 檢查點 15：最終配置合併 ---
+log_info "步驟 15：正在合併最終配置..."
 > .config.custom
 echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config.custom
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config.custom
@@ -296,12 +293,8 @@ echo "CONFIG_PACKAGE_resize2fs=y" >> .config.custom
 echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config.custom
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config.custom
 echo "CONFIG_PACKAGE_jq=y" >> .config.custom
-
-log_info "合併自定義配置..."
 cat .config.custom >> .config
-
-log_info "生成最終配置文件..."
 make defconfig
-log_success "軟件包啟用和依賴處理完成 。"
+log_success "步驟 15：最終配置合併完成。"
 
-log_success "所有配置完成，準備開始編譯..."
+log_success "所有預編譯步驟均已成功完成！準備開始編譯..."
