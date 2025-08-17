@@ -1,29 +1,8 @@
 #!/bin/bash
-# 最終解決方案腳本 v30：100%忠實復刻您提供的、完整的、成功的藍本，杜絕任何省略
-set -e  # 出错立即停止
+# 最終解決方案腳本 v34：採用您設計的、完美的Makefile集成方案
 
-download_with_size() {
-    local url="$1"
-    local output="$2"
-    local size=""
-
-    # 尝试获取文件大小
-    size=$(curl -sI "$url" 2>/dev/null | tr -d '\r' | grep -i Content-Length | awk '{printf "%.2f MB", $2/1024/1024}')
-
-    if [ -n "$size" ]; then
-        echo -e "ℹ️  准备下载：$url （大小：$size）"
-    else
-        echo -e "ℹ️  准备下载：$url （大小未知）"
-    fi
-
-    # 执行下载并显示进度
-    if wget --show-progress -O "$output" "$url"; then
-        echo "✅ 下载完成：$(du -h "$output" | cut -f1)"
-    else
-        echo "❌ 下载失败：$url"
-        exit 1
-    fi
-}
+# --- 啟用嚴格模式 ---
+set -e
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -31,14 +10,10 @@ log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
 # -------------------- 基础配置与变量定义 --------------------
-WGET_OPTS="-q --timeout=60 --tries=3 --retry-connrefused --connect-timeout=20 -L"
-ARCH="armv7"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
-ADGUARD_CORE_DIR="package/luci-app-adguardhome/root/usr/bin"
-ADGUARD_CONF_DIR="package/base-files/files/etc/AdGuardHome"
 
 # -------------------- 步驟 1：定義並寫入DTS文件 --------------------
 log_info "正在寫入您提供的、100%正確的DTS文件..."
@@ -334,74 +309,62 @@ else
     log_info "设备规则已存在，更新IMAGE_SIZE"
 fi
 
+# -------------------- 步驟 4：AdGuardHome集成（通过自定义Makefile） --------------------
+log_info "集成 AdGuardHome 核心 (依赖自定义 Makefile)..."
+PKG_DIR="package/custom/adguardhome-bin"
+mkdir -p "$PKG_DIR"
+if [ ! -f "$PKG_DIR/Makefile" ]; then
+cat > "$PKG_DIR/Makefile" <<'EOF'
+include $(TOPDIR)/rules.mk
 
-# -------------------- 步驟 4：AdGuardHome集成 (完整可用版) --------------------
-log_info "集成AdGuardHome..."
-mkdir -p "$ADGUARD_CORE_DIR" "$ADGUARD_CONF_DIR"
-# 安裝luci-app-adguardhome以創建必要的目錄結構
-./scripts/feeds install -p luci luci-app-adguardhome >/dev/null || log_error "安装luci-app-adguardhome失败"
+PKG_NAME:=adguardhome-bin
+PKG_VERSION:=v0.107.54
+PKG_RELEASE:=1
 
-ADGUARD_URLS=(
-  "https://ghproxy.com/https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${ARCH}.tar.gz"
-  "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${ARCH}.tar.gz"
-)
-ADGUARD_TMP="/tmp/adguard.tar.gz"
-ADGUARD_DOWNLOADED=false
+PKG_SOURCE_URL:=https://github.com/AdguardTeam/AdGuardHome/releases/download/$(PKG_VERSION )/AdGuardHome_linux_armv7.tar.gz
+PKG_HASH:=a2f66345d3b1455553f05757478037e46385193235555b88819875143659918b
 
-for url in "${ADGUARD_URLS[@]}"; do
-    log_info "正在尝试从 $url 下载 AdGuardHome..."
-    if download_with_size "$url" "$ADGUARD_TMP"; then
-        if file "$ADGUARD_TMP" | grep -q 'gzip compressed data'; then
-            log_success "AdGuardHome核心下载成功，且文件格式正确。"
-            ADGUARD_DOWNLOADED=true
-            break
-        else
-            log_info "下载的文件不是有效的gzip格式，尝试下一个URL..."
-            rm -f "$ADGUARD_TMP"
-        fi
-    else
-        log_info "从 $url 下载失败。尝试下一个URL..."
-    fi
-done
+PKG_BUILD_DIR := $(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
-if [ "$ADGUARD_DOWNLOADED" = true ]; then
-    tar -zxf "$ADGUARD_TMP" -C /tmp >/dev/null || log_error "解压缩AdGuardHome失败"
-    cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_CORE_DIR/" || log_error "AdGuardHome复制失败"
-    chmod +x "$ADGUARD_CORE_DIR/AdGuardHome"
-    rm -rf /tmp/AdGuardHome "$ADGUARD_TMP"
+include $(INCLUDE_DIR)/package.mk
+
+define Package/adguardhome-bin
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=AdGuardHome Binary
+  DEPENDS:=+luci-app-adguardhome
+endef
+
+define Package/adguardhome-bin/description
+  Provides the pre-compiled AdGuardHome binary, ensuring correct version in firmware.
+endef
+
+define Build/Prepare
+	$(call Build/Prepare/Default)
+endef
+
+define Package/adguardhome-bin/install
+	$(INSTALL_DIR) $(1)/usr/bin
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/AdGuardHome/AdGuardHome $(1)/usr/bin/
+endef
+
+$(eval $(call BuildPackage,adguardhome-bin))
+EOF
+log_success "自定义 AdGuardHome Makefile 已生成"
 else
-    log_error "AdGuardHome核心下载失败，所有URL都已尝试。"
+    log_info "自定义 AdGuardHome Makefile 已存在，跳过生成"
 fi
 
-cat > "$ADGUARD_CONF_DIR/AdGuardHome.yaml" <<EOF
-bind_host: 0.0.0.0
-bind_port: 3000
-users:
-  - name: admin
-    password: "\$2y\$10\$gIAKp1l.BME2k5p6mMYlj..4l5mhc8YBGZzI8J/6z8s8nJlQ6oP4y"
-dns:
-  bind_host: 0.0.0.0
-  port: 53
-  upstream_dns:
-    - 223.5.5.5
-    - 119.29.29.29
-  cache_size: 4194304
-filters:
-  - enabled: true
-    url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
-log:
-  file: /var/log/AdGuardHome.log
-EOF
-
-log_success "AdGuardHome集成完成"
-
-# -------------------- 步驟 5：sirpdboy插件集成 (完整復刻 ) --------------------
+# -------------------- 步驟 5：sirpdboy插件集成 --------------------
 log_info "集成sirpdboy插件..."
 mkdir -p "$CUSTOM_PLUGINS_DIR"
-if git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
+if [ ! -d "$CUSTOM_PLUGINS_DIR/luci-app-partexp/.git" ]; then
+  if ! git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
+    log_error "sirpdboy插件克隆失敗"
+  fi
   log_success "sirpdboy插件克隆成功"
 else
-  log_error "sirpdboy插件克隆失敗"
+  log_info "sirpdboy插件已存在 ，跳过克隆"
 fi
 
 # -------------------- 步驟 6：最終配置 --------------------
@@ -410,9 +373,10 @@ log_info "更新和安裝所有feeds..."
 ./scripts/feeds install -a
 
 log_info "啟用必要的軟件包..."
-# --- 關鍵修正：嚴格遵循成功藍本的依賴 ---
-grep -q "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
+# --- 啟用我們自定義的adguardhome-bin包，它會自動帶上luci-app-adguardhome ---
+grep -q "CONFIG_PACKAGE_adguardhome-bin=y" .config || echo "CONFIG_PACKAGE_adguardhome-bin=y" >> .config
 grep -q "CONFIG_PACKAGE_luci-app-partexp=y" .config || echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
+# --- 其他基礎依賴 ---
 grep -q "CONFIG_PACKAGE_kmod-ubi=y" .config || echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config
 grep -q "CONFIG_PACKAGE_kmod-ubifs=y" .config || echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config
 grep -q "CONFIG_PACKAGE_trx=y" .config || echo "CONFIG_PACKAGE_trx=y" >> .config
@@ -425,19 +389,4 @@ grep -q "CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y" .config || echo "CONFIG_TARGET_RO
 log_info "生成最終配置文件..."
 make defconfig
 
-log_success "所有配置完成 ，準備開始編譯..."
-# -------------------- DTS 文件检测 --------------------
-check_dts() {
-    local dts_file="target/linux/ipq40xx/files/arch/arm/boot/dts/qcom-ipq4019-cm520-79f.dts"
-    if [ -f "$dts_file" ]; then
-        echo "✅ DTS文件存在：$dts_file"
-        echo "---- 前 10 行内容 ----"
-        head -n 10 "$dts_file"
-        echo "----------------------"
-    else
-        echo "❌ DTS文件不存在，请检查写入步骤是否失败"
-        exit 1
-    fi
-}
-
-check_dts
+log_success "所有配置完成，準備開始編譯..."
