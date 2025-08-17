@@ -1,6 +1,30 @@
 #!/bin/bash
 # 最終解決方案腳本 v30：100%忠實復刻您提供的、完整的、成功的藍本，杜絕任何省略
-set -euo pipefail
+set -e  # 出错立即停止
+
+download_with_size() {
+    local url="$1"
+    local output="$2"
+    local size=""
+
+    # 先尝试获取文件大小
+    size=$(curl -sI "$url" 2>/dev/null | grep -i Content-Length | awk '{printf "%.2f MB", $2/1024/1024}')
+
+    if [ -n "$size" ]; then
+        echo -e "ℹ️  准备下载：$url （大小：$size）"
+    else
+        echo -e "ℹ️  准备下载：$url （大小未知）"
+    fi
+
+    # 执行下载并显示进度
+    if wget --show-progress -O "$output" "$url"; then
+        echo "✅ 下载完成：$(du -h "$output" | cut -f1)"
+    else
+        echo "❌ 下载失败：$url"
+        exit 1
+    fi
+}
+
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
