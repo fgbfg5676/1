@@ -7,8 +7,8 @@ download_with_size() {
     local output="$2"
     local size=""
 
-    # 先尝试获取文件大小
-    size=$(curl -sI "$url" 2>/dev/null | grep -i Content-Length | awk '{printf "%.2f MB", $2/1024/1024}')
+    # 尝试获取文件大小
+    size=$(curl -sI "$url" 2>/dev/null | tr -d '\r' | grep -i Content-Length | awk '{printf "%.2f MB", $2/1024/1024}')
 
     if [ -n "$size" ]; then
         echo -e "ℹ️  准备下载：$url （大小：$size）"
@@ -335,6 +335,8 @@ else
 fi
 
 # -------------------- 步驟 4：AdGuardHome集成 (完整復刻) --------------------
+
+# -------------------- 步驟 4：AdGuardHome集成 (完整可用版) --------------------
 log_info "集成AdGuardHome..."
 mkdir -p "$ADGUARD_CORE_DIR" "$ADGUARD_CONF_DIR"
 # 安裝luci-app-adguardhome以創建必要的目錄結構
@@ -346,30 +348,6 @@ ADGUARD_URLS=(
 )
 ADGUARD_TMP="/tmp/adguard.tar.gz"
 ADGUARD_DOWNLOADED=false
-
-download_with_size() {
-    local url="$1"
-    local output="$2"
-    local size=""
-
-    # 尝试获取文件大小
-    size=$(curl -sI "$url" 2>/dev/null | grep -i Content-Length | awk '{printf "%.2f MB", $2/1024/1024}')
-    if [ -n "$size" ]; then
-        log_info "准备下载：$url （大小：$size）"
-    else
-        log_info "准备下载：$url （大小未知）"
-    fi
-
-    # 执行下载并显示进度
-    if wget --show-progress -O "$output" "$url"; then
-        local actual_size
-        actual_size=$(du -h "$output" | cut -f1)
-        log_info "下载完成，实际文件大小：$actual_size"
-        return 0
-    else
-        return 1
-    fi
-}
 
 for url in "${ADGUARD_URLS[@]}"; do
     log_info "正在尝试从 $url 下载 AdGuardHome..."
@@ -417,7 +395,6 @@ log:
 EOF
 
 log_success "AdGuardHome集成完成"
-
 
 # -------------------- 步驟 5：sirpdboy插件集成 (完整復刻 ) --------------------
 log_info "集成sirpdboy插件..."
