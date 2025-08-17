@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v10：根據Permission denied錯誤，添加chmod +x權限
+# 最終解決方案腳本 v15：融合了用戶提供的優秀核心集成腳本
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -7,16 +7,16 @@ log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
 # -------------------- 基础配置与变量定义 --------------------
-WGET_OPTS="-q --timeout=30 --tries=3 --retry-connrefused --connect-timeout=10 -L"
-ARCH="armv7" # 保持armv7，因為您驗證了架構是對的
+WGET_OPTS="-q --timeout=60 --tries=3 --retry-connrefused --connect-timeout=20 -L" # 增加了超時
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
-ADGUARD_DIR="package/luci-app-adguardhome/root/usr/bin"
-ADGUARD_CONF_DIR="package/base-files/files/etc/AdGuardHome"
+# --- 關鍵變更：使用標準的files目錄來確保打包成功 ---
+FILES_DIR="$(pwd)/files"
 
 # -------------------- 步驟 1：定義最終完美的DTS內容 --------------------
+# (這部分內容已驗證無誤，保持不變)
 read -r -d '' FINAL_PERFECT_DTS <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
@@ -92,13 +92,14 @@ read -r -d '' FINAL_PERFECT_DTS <<'EOF'
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
 
-# -------------------- 步驟 2：直接寫入完美的DTS文件 --------------------
+# -------------------- 步驟 2：寫入DTS文件 --------------------
 log_info "正在寫入最終的、預先合併好的DTS文件..."
 mkdir -p "$DTS_DIR"
 echo "$FINAL_PERFECT_DTS" > "$DTS_FILE"
 log_success "DTS文件寫入成功。"
 
 # -------------------- 步驟 3：創建網絡配置文件 --------------------
+# (保持不變)
 log_info "創建針對 CM520-79F 的網絡配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 mkdir -p "$BOARD_DIR"
@@ -119,6 +120,7 @@ EOF
 log_success "網絡配置文件創建完成"
 
 # -------------------- 步驟 4：設備規則配置 --------------------
+# (保持不變)
 log_info "配置設備規則..."
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
@@ -140,49 +142,58 @@ else
     log_info "设备规则已存在，更新IMAGE_SIZE"
 fi
 
-# -------------------- 步驟 5：集成插件（權限修正版） --------------------
+# -------------------- 步驟 5：集成插件（融合您的智慧） --------------------
 
-# --- AdGuardHome集成 (修正權限) ---
+# --- AdGuardHome集成 (使用您的優秀腳本，並集成到標準打包流程) ---
 log_info "集成AdGuardHome..."
-mkdir -p "$ADGUARD_DIR" "$ADGUARD_CONF_DIR"
+# 創建標準打包目錄
+mkdir -p "$FILES_DIR/usr/bin"
+mkdir -p "$FILES_DIR/etc/AdGuardHome"
+
 # 我們依然需要luci-app-adguardhome這個包，它提供了luci界面和init腳本
 ./scripts/feeds install -p luci luci-app-adguardhome >/dev/null || log_error "安装luci-app-adguardhome失败"
-ADGUARD_URLS=(
-  "https://ghproxy.com/https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${ARCH}.tar.gz"
-  "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_${ARCH}.tar.gz"
- )
-ADGUARD_TMP="/tmp/adguard.tar.gz"
-ADGUARD_DOWNLOADED=false
-for url in "${ADGUARD_URLS[@]}"; do
-  log_info "正在尝试从 $url 下载 AdGuardHome..."
-  if wget $WGET_OPTS -O "$ADGUARD_TMP" "$url"; then
-    if file "$ADGUARD_TMP" | grep -q 'gzip compressed data'; then
-      log_success "AdGuardHome核心下载成功，且文件格式正确。"
-      ADGUARD_DOWNLOADED=true
-      break
-    else
-      log_info "下载的文件不是有效的gzip格式，尝试下一个URL..."
-      rm -f "$ADGUARD_TMP"
-    fi
-  else
-    log_info "从 $url 下载失败。尝试下一个URL..."
-  fi
-done
-if [ "$ADGUARD_DOWNLOADED" = true ]; then
-  tar -zxf "$ADGUARD_TMP" -C /tmp >/dev/null || log_error "解压缩AdGuardHome失败"
-  cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_DIR/" || log_error "AdGuardHome复制失败"
-  
-  # -------------------- 關鍵修正！添加可執行權限！ --------------------
-  log_info "為AdGuardHome核心添加可執行權限..."
-  chmod +x "$ADGUARD_DIR/AdGuardHome"
-  log_success "權限添加成功。"
-  # --------------------------------------------------------------------
 
-  rm -rf /tmp/AdGuardHome "$ADGUARD_TMP"
+# 使用您提供的、通過API獲取URL的健壯方法
+log_info "正在通過API獲取最新的AdGuardHome下載鏈接..."
+ADGUARD_URL=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest |
+              grep "browser_download_url.*linux_armv7" |
+              cut -d '"' -f 4 )
+
+if [ -n "$ADGUARD_URL" ]; then
+    log_success "成功獲取下載鏈接: $ADGUARD_URL"
+    # 使用臨時文件來下載，而不是直接下載到目標目錄
+    ADGUARD_TMP_TAR="/tmp/AdGuardHome.tar.gz"
+    if wget $WGET_OPTS -O "$ADGUARD_TMP_TAR" "$ADGUARD_URL"; then
+        log_success "AdGuardHome核心下載成功。"
+        # 解壓到臨時目錄
+        TMP_DIR=$(mktemp -d)
+        tar -zxf "$ADGUARD_TMP_TAR" -C "$TMP_DIR" --warning=no-unknown-keyword
+        
+        # 查找解壓后的AdGuardHome可執行文件
+        ADG_EXE=$(find "$TMP_DIR" -name "AdGuardHome" -type f | head -n 1)
+        if [ -n "$ADG_EXE" ]; then
+            log_info "找到核心文件: $ADG_EXE"
+            # 複製可執行文件到標準的files打包目錄
+            cp "$ADG_EXE" "$FILES_DIR/usr/bin/AdGuardHome" || log_error "AdGuardHome复制到files目錄失敗"
+            # 在files目錄中為核心添加可執行權限
+            chmod +x "$FILES_DIR/usr/bin/AdGuardHome"
+            log_success "AdGuardHome核心已成功複製並設置權限。"
+        else
+            log_error "在解壓的目錄中未找到AdGuardHome可執行文件！"
+        fi
+        
+        # 清理臨時文件
+        rm -rf "$TMP_DIR" "$ADGUARD_TMP_TAR"
+    else
+        log_error "AdGuardHome核心下載失敗！"
+    fi
 else
-  log_error "AdGuardHome核心下载失败，所有URL都已尝试。"
+    log_error "通過API獲取AdGuardHome核心下載地址失敗！"
 fi
-cat > "$ADGUARD_CONF_DIR/AdGuardHome.yaml" <<EOF
+
+# 將配置文件也放入 files 目錄
+log_info "將配置文件複製到標準打包目錄 $FILES_DIR/etc/AdGuardHome/"
+cat > "$FILES_DIR/etc/AdGuardHome/AdGuardHome.yaml" <<EOF
 bind_host: 0.0.0.0
 bind_port: 3000
 users:
@@ -203,6 +214,7 @@ log:
 EOF
 grep -q "CONFIG_PACKAGE_luci-app-adguardhome=y" .config || echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config
 log_success "AdGuardHome集成完成"
+
 
 # --- sirpdboy插件集成 (完整版 ) ---
 log_info "集成sirpdboy插件..."
