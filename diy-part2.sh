@@ -1,5 +1,5 @@
 #!/bin/bash
-# 最終解決方案腳本 v20：提升Shell兼容性，解決罕見的read命令報錯問題
+# 最終解決方案腳本 v21：回歸最安全的DTS定義方式，解決最後的語法錯誤
 
 # --- 啟用嚴格模式 ---
 set -euo pipefail
@@ -25,8 +25,9 @@ CUSTOM_PLUGINS_DIR="package/custom"
 FILES_DIR="$(pwd)/files"
 
 # -------------------- 步驟 1：定義最終完美的DTS內容 --------------------
-# --- 關鍵優化：使用最通用的方式定義多行字符串，以增強Shell兼容性 ---
-FINAL_PERFECT_DTS='/dts-v1/;
+# --- 關鍵修正：回歸到v19版本中最安全、最不會引起歧義的read命令 ---
+read -r -d '' FINAL_PERFECT_DTS <<'EOF'
+/dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 #include "qcom-ipq4019.dtsi"
 #include <dt-bindings/gpio/gpio.h>
@@ -98,7 +99,7 @@ FINAL_PERFECT_DTS='/dts-v1/;
 &usb2_hs_phy { status = "okay"; };
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
-'
+EOF
 
 # -------------------- 步驟 2：寫入DTS文件 --------------------
 log_info "正在寫入最終的、預先合併好的DTS文件..."
@@ -106,11 +107,7 @@ mkdir -p "$DTS_DIR"
 echo "$FINAL_PERFECT_DTS" > "$DTS_FILE"
 log_success "DTS文件寫入成功。"
 
-# ... (腳本的其餘部分與v19完全相同，此處省略以保持簡潔) ...
-# ... (The rest of the script is identical to v19 and is omitted for brevity) ...
-
 # -------------------- 步驟 3：創建網絡配置文件 --------------------
-# (保持不變)
 log_info "創建針對 CM520-79F 的網絡配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 mkdir -p "$BOARD_DIR"
@@ -131,7 +128,6 @@ EOF
 log_success "網絡配置文件創建完成"
 
 # -------------------- 步驟 4：設備規則配置 --------------------
-# (保持不變)
 log_info "配置設備規則..."
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
@@ -154,8 +150,6 @@ else
 fi
 
 # -------------------- 步驟 5：集成插件（零依賴自適應版） --------------------
-
-# --- AdGuardHome集成 ---
 log_info "集成AdGuardHome..."
 mkdir -p "$FILES_DIR/usr/bin"
 mkdir -p "$FILES_DIR/etc/AdGuardHome"
@@ -163,7 +157,6 @@ mkdir -p "$FILES_DIR/etc/config"
 mkdir -p "$FILES_DIR/etc/init.d"
 mkdir -p "$FILES_DIR/etc/hotplug.d/iface"
 
-# 使用jq和備用匹配，確保URL獲取萬無一失
 log_info "正在通過API獲取最新的AdGuardHome下載鏈接..."
 API_RESPONSE=$(curl -s --retry 3 --connect-timeout 10 https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest )
 ADGUARD_URL=$(echo "$API_RESPONSE" | jq -r '.assets[] | .browser_download_url | select(contains("linux_armv7.tar.gz"))')
@@ -172,7 +165,6 @@ if [ -z "$ADGUARD_URL" ]; then
     ADGUARD_URL=$(echo "$API_RESPONSE" | jq -r '.assets[] | .browser_download_url | select(contains("linux_arm.tar.gz"))')
 fi
 
-# 在獲取失敗時，明確報錯並終止
 if [ -z "$ADGUARD_URL" ]; then
     log_error "通過API獲取AdGuardHome核心下載地址失敗！"
 fi
@@ -197,7 +189,6 @@ else
     log_error "AdGuardHome核心下載失敗！"
 fi
 
-# 創建兼顧安全與閃存壽命的YAML配置文件
 log_info "創建安全的AdGuardHome YAML配置文件..."
 cat > "$FILES_DIR/etc/AdGuardHome/AdGuardHome.yaml" <<EOF
 workdir: /tmp/AdGuardHome
@@ -219,7 +210,6 @@ log:
 EOF
 log_success "YAML配置文件創建完成 。"
 
-# 創建對應的UCI配置文件
 log_info "創建AdGuardHome的UCI配置文件..."
 cat > "$FILES_DIR/etc/config/adguardhome" <<EOF
 config adguardhome 'global'
@@ -230,7 +220,6 @@ config adguardhome 'global'
 EOF
 log_success "UCI配置文件創建完成。"
 
-# 創建專業的init.d啟動腳本
 log_info "創建AdGuardHome的init.d啟動腳本..."
 cat > "$FILES_DIR/etc/init.d/adguardhome" <<'EOF'
 #!/bin/sh /etc/rc.common
@@ -264,19 +253,15 @@ EOF
 chmod +x "$FILES_DIR/etc/init.d/adguardhome"
 log_success "init.d啟動腳本創建完成。"
 
-# 創建智能檢測的hotplug腳本
 log_info "創建AdGuardHome的hotplug腳本..."
 cat > "$FILES_DIR/etc/hotplug.d/iface/99-adguardhome" <<'EOF'
 #!/bin/sh
 
-# 當LAN口就緒時，智能檢測網絡連通性後再啟動AdGuardHome
 if [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ]; then
     (
-        # 循環檢測網絡，最多等待30秒
         RETRY_COUNT=0
         while [ $RETRY_COUNT -lt 15 ]; do
             if ping -c 1 -W 1 223.5.5.5 >/dev/null 2>&1; then
-                # 網絡就緒，重啟服務
                 /etc/init.d/adguardhome enabled && /etc/init.d/adguardhome restart
                 exit 0
             fi
@@ -289,7 +274,6 @@ EOF
 chmod +x "$FILES_DIR/etc/hotplug.d/iface/99-adguardhome"
 log_success "hotplug腳本創建完成。"
 
-# --- sirpdboy插件集成 ---
 log_info "集成sirpdboy插件..."
 mkdir -p "$CUSTOM_PLUGINS_DIR"
 if git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
@@ -304,7 +288,6 @@ log_info "更新和安裝所有feeds..."
 ./scripts/feeds install -a
 
 log_info "啟用必要的軟件包..."
-# 創建或清空 .config.custom 文件
 > .config.custom
 echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> .config.custom
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config.custom
@@ -314,12 +297,11 @@ echo "CONFIG_PACKAGE_kmod-ubi=y" >> .config.custom
 echo "CONFIG_PACKAGE_kmod-ubifs=y" >> .config.custom
 echo "CONFIG_PACKAGE_jq=y" >> .config.custom
 
-# 使用通用的cat命令合併配置 ，增強兼容性
 log_info "合併自定義配置..."
 cat .config.custom >> .config
 
 log_info "生成最終配置文件..."
 make defconfig
-log_success "軟件包啟用和依賴處理完成。"
+log_success "軟件包啟用和依賴處理完成 。"
 
 log_success "所有配置完成，準備開始編譯..."
