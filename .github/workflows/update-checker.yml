@@ -2,7 +2,7 @@
 # https://github.com/P3TERX/Actions-OpenWrt
 #
 # File: .github/workflows/update-checker.yml
-# Description: Source code update checker
+# Description: Source code update checker for ImmortalWRT fork
 #
 
 name: Update Checker
@@ -22,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
     - name: Get Commit Hash
       id: getHash
       run: |
@@ -45,10 +44,10 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.TARGET_REPO_PAT }}      # ✅ 使用你 fork 仓库的 PAT
-        repository: ${{ env.TARGET_REPO }}          # ✅ 指向 fork 仓库
-        event-type: "Source Code Update"           # ✅ 加引号
-        client-payload: "{}"                       # ✅ 明确传空 payload
+        token: ${{ secrets.PAT }}                # ✅ 使用你 fork 仓库的 PAT Secret
+        repository: ${{ env.TARGET_REPO }}       # ✅ 指向你的 fork 仓库
+        event-type: "Source Code Update"        # ✅ 加引号保证稳定性
+        client-payload: "{}"                     # ✅ 明确传递空 payload
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
