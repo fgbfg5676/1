@@ -1,16 +1,16 @@
+#
 # https://github.com/P3TERX/Actions-OpenWrt
 #
 # File: .github/workflows/update-checker.yml
 # Description: Source code update checker for forked ImmortalWrt
 #
-# License: MIT
 
 name: Update Checker
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt   # 🔴 替换为你的 fork 仓库
+  TARGET_REPO: fgbfg5676/immortalwrt        # 🔹 你的 fork 仓库
 
 on:
   workflow_dispatch:
@@ -41,13 +41,14 @@ jobs:
       run: |
         echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
 
-    - name: Trigger build
+    - name: Trigger build on fork
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.TARGET_REPO_PAT }}          # 🔴 使用你自己的 PAT secret
-        repository: ${{ env.TARGET_REPO }}             # 🔴 指向你的 fork
+        token: ${{ secrets.TARGET_REPO_PAT }}       # 🔴 必须使用你生成的 PAT secret
+        repository: ${{ env.TARGET_REPO }}          # 🔴 目标仓库
         event-type: Source Code Update
+        client-payload: {}
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
