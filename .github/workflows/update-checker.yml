@@ -1,5 +1,8 @@
 #
-# Update Checker for forked ImmortalWRT
+# https://github.com/P3TERX/Actions-OpenWrt
+#
+# File: .github/workflows/update-checker.yml
+# Description: Source code update checker
 #
 
 name: Update Checker
@@ -7,17 +10,18 @@ name: Update Checker
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt    # ✅ 你的 fork 仓库
+  TARGET_REPO: fgbfg5676/immortalwrt
 
 on:
   workflow_dispatch:
+#  schedule:
+#    - cron: 0 */18 * * *
 
 jobs:
   check:
     runs-on: ubuntu-latest
 
     steps:
-
     - name: Get Commit Hash
       id: getHash
       run: |
@@ -40,15 +44,13 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.TARGET_REPO_PAT }}      # ✅ 使用你的 fork PAT
-        repository: ${{ env.TARGET_REPO }}          # ✅ 指向 fork 仓库
-        event-type: "Source Code Update"
-        client-payload: "{}"
+        token: ${{ secrets.immortalwrt }}           # ✅ 使用你的 PAT secret
+        repository: ${{ env.TARGET_REPO }}          # ✅ 指向你的 fork 仓库
+        event-type: "Source Code Update"            # ✅ 引号避免 YAML 解析问题
+        client-payload: "{}"                        # ✅ 空 payload
 
-    - name: Delete workflow runs (fork only)
+    - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
       with:
-        token: ${{ secrets.TARGET_REPO_PAT }}      # ✅ 使用你的 fork PAT
-        workflow_name: "OpenWrt Builder"           # ✅ 只删除 fork 的这个 workflow
         retain_days: 0
         keep_minimum_runs: 2
