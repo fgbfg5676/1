@@ -1,21 +1,17 @@
-#
 # https://github.com/P3TERX/Actions-OpenWrt
 #
 # File: .github/workflows/update-checker.yml
-# Description: Source code update checker
+# Description: Source code update checker for forked ImmortalWrt
 #
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
+# License: MIT
 
 name: Update Checker
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt
+  TARGET_REPO: fgbfg5676/immortalwrt   # 🔴 替换为你的 fork 仓库
+
 on:
   workflow_dispatch:
 #  schedule:
@@ -49,7 +45,8 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ github.token }}
+        token: ${{ secrets.TARGET_REPO_PAT }}          # 🔴 使用你自己的 PAT secret
+        repository: ${{ env.TARGET_REPO }}             # 🔴 指向你的 fork
         event-type: Source Code Update
 
     - name: Delete workflow runs
