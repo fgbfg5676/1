@@ -2,12 +2,12 @@ name: Update Checker
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt
+  TARGET_REPO: fgbfg5676/immortalwrt   # 🔴 指向你的 fork 仓库
   UPSTREAM_REPO: immortalwrt/immortalwrt
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */18 * * *'
+    - cron: '0 */18 * * *'   # 每18小时检查一次更新
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -35,7 +35,7 @@ jobs:
       if: steps.checkCommits.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v3
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.TARGET_REPO_PAT }}   # 🔴 使用 PAT
         repository: ${{ env.TARGET_REPO }}
         event-type: "Source Code Update"
         client-payload: |
