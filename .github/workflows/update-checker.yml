@@ -1,47 +1,57 @@
-name: Update Checker
+name: ImmortalWrt Auto Build
+
+on:
+  repository_dispatch:
+    types: [Source Code Update]
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt
-
-on:
-  workflow_dispatch:
+  CONFIG_FILE: .config
 
 jobs:
-  check:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Get Commit Hash
-      id: getHash
-      run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH .
-        echo "commitHash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Compare Commit Hash
-      id: cacheHash
-      uses: actions/cache@v3
-      with:
-        path: .commitHash
-        key: commitHash_${{ steps.getHash.outputs.commitHash }}
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+          gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+          python3-distutils rsync unzip zlib1g-dev file swig
 
-    - name: Save New Commit Hash
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      run: |
-        echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+      - name: Clone Source
+        run: |
+          git clone $REPO_URL -b $REPO_BRANCH immortalwrt
+          cd immortalwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-    - name: Trigger build
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      uses: peter-evans/repository-dispatch@v2
-      with:
-        token: ${{ secrets.TARGET_REPO_PAT }}
-        repository: ${{ env.TARGET_REPO }}
-        event-type: "Source Code Update"
-        client-payload: "{}"
+      - name: Apply Patches
+        run: |
+          cd immortalwrt
+          git apply ../patches/*.patch 2>/dev/null || true
 
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@v2
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
+      - name: Copy Config
+        run: |
+          cp $CONFIG_FILE immortalwrt/.config
+
+      - name: Add Custom Packages
+        run: |
+          cd immortalwrt
+          echo "CONFIG_PACKAGE_luci-app-amlogic=y" >> .config
+          make defconfig
+
+      - name: Build Firmware
+        run: |
+          cd immortalwrt
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: immortalwrt-firmware
+          path: immortalwrt/bin/targets/
