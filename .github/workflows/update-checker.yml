@@ -2,12 +2,12 @@ name: Update Checker
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt   # 🔴 指向你的 fork 仓库
+  TARGET_REPO: fgbfg5676/immortalwrt
   UPSTREAM_REPO: immortalwrt/immortalwrt
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */18 * * *'   # 每18小时检查一次更新
+    - cron: '0 */18 * * *'
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -15,9 +15,7 @@ jobs:
     - name: Get Upstream Commit Hash
       id: getHash
       run: |
-        # 使用 ls-remote 获取最新提交哈希，无需克隆整个仓库
         echo "commitHash=$(git ls-remote $REPO_URL refs/heads/$REPO_BRANCH | cut -f1)" >> $GITHUB_OUTPUT
-        echo "Current upstream commit: $commitHash"
     
     - name: Check for New Commits
       id: checkCommits
@@ -32,14 +30,13 @@ jobs:
       if: steps.checkCommits.outputs.cache-hit != 'true'
       run: |
         echo "${{ steps.getHash.outputs.commitHash }}" > .commitHash
-        echo "New commit detected: ${{ steps.getHash.outputs.commitHash }}"
     
     - name: Trigger Build Workflow
       if: steps.checkCommits.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v3
       with:
-        token: ${{ secrets.TARGET_REPO_PAT }}          # 🔴 你的 PAT
-        repository: ${{ env.TARGET_REPO }}             # 🔴 你的 fork
+        token: ${{ secrets.GITHUB_TOKEN }}
+        repository: ${{ env.TARGET_REPO }}
         event-type: "Source Code Update"
         client-payload: |
           {
@@ -54,6 +51,7 @@ jobs:
         retain_days: 1
         keep_minimum_runs: 3
     
+    # 可选：如果设置了 SLACK_WEBHOOK_URL，保留此步骤
     - name: Notify Update Status
       if: always()
       uses: 8398a7/action-slack@v3
