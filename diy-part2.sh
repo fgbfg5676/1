@@ -2,67 +2,59 @@
 #
 # 最終解決方案腳本 v42 - 畢業作品（最終防線版）
 # 作者: The Architect & Manus AI
-# 描述: 一個單一、完整的腳本，放棄所有Makefile技巧，在預編譯階段親手準備好所有文件。
+# 描述: 一個單一、完整的腳本，負責所有下載、清理、配置和驗證工作。
 #
 
 # --- 啟用嚴格模式，任何錯誤立即終止 ---
 set -euxo pipefail
-# ========================================================
 
-# ========================================================
-
-# ✅ 默认工作目录
-WORKDIR="${WORKDIR:-/workdir}"
-
-echo "Step 1: Define base variables..."
-echo "WORKDIR is set to: $WORKDIR"
-
-echo "Step 2: Create necessary directories..."
-mkdir -p "$WORKDIR"
-mkdir -p "$WORKDIR/openwrt"
-
-# -------------------- 步驟 0：日誌函數 --------------------
+# --- 日誌函數 ---
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
-# =================================================================
-# =================== 預編譯配置階段 (Pre-Compile) ==================
-#  在 diy-part2.sh 的開頭部分修改
-
-log_info "步驟 9：正在啟用必要的軟件包並生成最終配置..."
-
-# 釜底抽薪：在生成配置前，強制禁用導致衝突的 snmpd 相關軟體包
-# 這會覆蓋掉任何其他 feed 或配置可能引入的衝突選項
-log_info "正在強制禁用 SNMP 相關衝突軟體包..."
-echo "CONFIG_PACKAGE_snmpd=n" >> .config
-echo "CONFIG_PACKAGE_libnetsnmp=n" >> .config
-log_success "SNMP 衝突軟體包已禁用。"
+log_info "===== 開始執行終極配置腳本 ====="
 
 # =================================================================
+# 步驟 1：更新、安裝、並清理 Feeds
+# =================================================================
+log_info "步驟 1：更新和安裝所有 Feeds..."
+./scripts/feeds update -a
+log_success "Feeds 更新完成。"
 
-log_info "===== 開始執行預編譯配置 ====="
+log_info "正在清理可能衝突的軟體包 (snmpd)..."
+# ✅ 關鍵修復：在安裝 feeds 之前或之後清理都可以，但安裝後更保險
+find ./feeds -name "snmpd" -type d | xargs rm -rf
+find ./feeds -name "libnetsnmp" -type d | xargs rm -rf
+log_success "衝突軟體包清理完成。"
 
-# -------------------- 步驟 1：基礎變量定義 --------------------
-log_info "步驟 1：定義基礎變量..."
-ARCH="armv7"
-DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
-DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
-GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+./scripts/feeds install -a
+log_success "Feeds 安裝完成。"
+
+# =================================================================
+# 步驟 2：下載所有自訂插件
+# =================================================================
+log_info "步驟 2：下載自訂插件..."
 CUSTOM_PLUGINS_DIR="package/custom"
-# ✅ 确保 AdGuardHome 路径有默认值，避免 mkdir 报错
-ADGUARD_CORE_DIR="${ADGUARD_CORE_DIR:-$WORKDIR/AdGuardHome}"
-log_success "基礎變量定義完成。"
+mkdir -p "$CUSTOM_PLUGINS_DIR"
 
-# -------------------- 步驟 2：創建必要的目錄 --------------------
-log_info "步驟 2：創建必要的目錄..."
-mkdir -p "$DTS_DIR" "$CUSTOM_PLUGINS_DIR" "$ADGUARD_CORE_DIR"
-log_success "目錄創建完成。"
+# --- sirpdboy 插件 ---
+if [ ! -d "$CUSTOM_PLUGINS_DIR/luci-app-partexp/.git" ]; then
+  git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"
+  log_success "sirpdboy 插件克隆成功 。"
+else
+  log_info "sirpdboy 插件已存在，跳過克隆。"
+fi
 
+# =================================================================
+# 步驟 3：寫入硬體定義 (DTS, 網路, 設備規則)
+# =================================================================
+log_info "步驟 3：寫入硬體定義..."
 
-# -------------------- 步驟 3：寫入DTS文件 --------------------
-log_info "步驟 3：正在寫入100%正確的DTS文件..."
-cat > "$DTS_FILE" <<'EOF'
+# --- 寫入 DTS 文件 ---
+DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
+mkdir -p "$DTS_DIR"
+cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 
@@ -309,19 +301,18 @@ cat > "$DTS_FILE" <<'EOF'
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
-log_success "DTS文件寫入成功。"
+log_success "DTS 文件寫入成功。"
 
-# -------------------- 步驟 4：創建網絡配置文件 --------------------
-log_info "步驟 4：創建針對 CM520-79F 的網絡配置文件..."
+# --- 創建網絡配置文件 ---
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 mkdir -p "$BOARD_DIR"
-cat > "$BOARD_DIR/02_network" <<EOF
+cat > "$BOARD_DIR/02_network" <<'EOF'
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
 	local machine
-	machine=\$(board_name)
-	case "\$machine" in
+	machine=$(board_name)
+	case "$machine" in
 	"mobipromo,cm520-79f")
 		ucidef_set_interfaces_lan_wan "eth1" "eth0"
 		;;
@@ -331,8 +322,8 @@ boot_hook_add preinit_main ipq40xx_board_detect
 EOF
 log_success "網絡配置文件創建完成。"
 
-# -------------------- 步驟 5：配置設備規則 --------------------
-log_info "步驟 5：配置設備規則..."
+# --- 配置設備規則 ---
+GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
 
@@ -347,56 +338,51 @@ define Device/mobipromo_cm520-79f
 endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
-    log_success "设备规则添加完成。"
+    log_success "設備規則添加完成。"
 else
     sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
-    log_info "设备规则已存在，更新IMAGE_SIZE。"
+    log_info "設備規則已存在，更新 IMAGE_SIZE。"
 fi
 
+# =================================================================
+# 步驟 4：生成最終配置文件 .config
+# =================================================================
+log_info "步驟 4：生成最終 .config 文件..."
 
-# -------------------- 步驟 7：sirpdboy插件集成 --------------------
-log_info "步驟 7：集成sirpdboy插件..."
-if [ ! -d "$CUSTOM_PLUGINS_DIR/luci-app-partexp/.git" ]; then
-  if ! git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"; then
-    log_error "sirpdboy插件克隆失敗"
-  fi
-  log_success "sirpdboy插件克隆成功 。"
-else
-  log_info "sirpdboy插件已存在，跳过克隆。"
-fi
+# --- 創建一個全新的 .config ---
+# ✅ 關鍵修復：確保我們從一個乾淨的狀態開始
+rm -f .config .config.old
+touch .config
 
-# -------------------- 步驟 8：更新與安裝Feeds --------------------
-log_info "步驟 8：更新和安裝所有feeds..."
-./scripts/feeds update -a
-./scripts/feeds install -a
-log_success "Feeds操作完成。"
+# --- 基礎配置：選擇目標平台和設備 ---
+# ✅ 關鍵修復：這是解決「目標設備未啟用」問題的核心
+log_info "正在設定目標平台和設備..."
+echo "CONFIG_TARGET_ipq40xx=y" >> .config
+echo "CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y" >> .config
+log_success "目標平台和設備設定完成。"
 
-# -------------------- 步驟 9：生成最終配置文件 --------------------
-log_info "步驟 9：正在啟用必要的軟件包並生成最終配置..."
+# --- 軟體包配置 ---
+log_info "正在設定軟體包..."
+# 在這裡加入您所有需要的軟體包
+echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
+# ... 其他您需要的軟體包，例如:
+# echo "CONFIG_PACKAGE_luci-app-ddns=y" >> .config
+# echo "CONFIG_PACKAGE_kmod-usb-storage=y" >> .config
+log_success "軟體包設定完成。"
 
-# 創建一個臨時的 .config.custom 文件
-CONFIG_FILE=".config.custom"
-rm -f $CONFIG_FILE
-
-# --- 啟用sirpdboy插件 ---
-echo "CONFIG_PACKAGE_luci-app-partexp=y" >> $CONFIG_FILE
-
-
-# 將自定義配置合併到 .config
-cat $CONFIG_FILE >> .config
-rm -f $CONFIG_FILE
-
-# 生成最終的 .config 文件
+# --- 執行 make defconfig ---
+# ✅ 關鍵步驟：基於我們上面提供的最簡配置，自動補完所有依賴，生成最終的完整 .config
+log_info "正在執行 'make defconfig' 來生成完整配置..."
 make defconfig
-log_success "最終配置文件生成完成。"
+log_success "最終 .config 文件生成完成。"
 
-if ! grep -q "CONFIG_TARGET_DEVICE_ipq40xx_DEVICE_mobipromo_cm520-79f=y" .config; then
-    log_error "目標設備 mobipromo_cm520-79f 沒有正確啟用！"
+# =================================================================
+# 步驟 5：最終驗證
+# =================================================================
+log_info "步驟 5：最終驗證 .config 文件..."
+if ! grep -q "CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y" .config; then
+    log_error "最終驗證失敗：目標設備 mobipromo_cm520-79f 未被啟用！"
 fi
+log_success "配置驗證通過！"
 
-# =================================================================
-# =================== 預編譯配置結束 ==============================
-# =================================================================
-
-log_success "所有預編譯步驟均已成功完成！準備開始編譯..."
-log_info "接下來請執行 'make' 命令進行編譯。"
+log_info "===== 所有配置步驟已成功完成！準備開始編譯。 ====="
