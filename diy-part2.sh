@@ -1,8 +1,7 @@
 #!/bin/bash
 #
-# 最終解決方案腳本 v42 - 畢業作品（最終防線版）
-# 作者: The Architect & Manus AI
-# 描述: 一個單一、完整的腳本，負責所有下載、清理、配置和驗證工作。
+# 最終防線版 diy-part2.sh (v44)
+# 描述: 鎖定問題根源在於硬體定義，採用 sed 修改現有設備的終極策略。
 #
 
 # --- 啟用嚴格模式，任何錯誤立即終止 ---
@@ -13,32 +12,22 @@ log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
-log_info "===== 開始執行終極配置腳本 ====="
+log_info "===== 開始執行 v44 版終極配置腳本 ====="
 
 # =================================================================
-# 步驟 1：更新、安裝、並清理 Feeds
+# 步驟 1：更新與安裝 Feeds
 # =================================================================
 log_info "步驟 1：更新和安裝所有 Feeds..."
 ./scripts/feeds update -a
-log_success "Feeds 更新完成。"
-
-log_info "正在清理可能衝突的軟體包 (snmpd)..."
-# ✅ 關鍵修復：在安裝 feeds 之前或之後清理都可以，但安裝後更保險
-find ./feeds -name "snmpd" -type d | xargs rm -rf
-find ./feeds -name "libnetsnmp" -type d | xargs rm -rf
-log_success "衝突軟體包清理完成。"
-
 ./scripts/feeds install -a
-log_success "Feeds 安裝完成。"
+log_success "Feeds 操作完成。"
 
 # =================================================================
-# 步驟 2：下載所有自訂插件
+# 步驟 2：下載自訂插件
 # =================================================================
 log_info "步驟 2：下載自訂插件..."
 CUSTOM_PLUGINS_DIR="package/custom"
 mkdir -p "$CUSTOM_PLUGINS_DIR"
-
-# --- sirpdboy 插件 ---
 if [ ! -d "$CUSTOM_PLUGINS_DIR/luci-app-partexp/.git" ]; then
   git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"
   log_success "sirpdboy 插件克隆成功 。"
@@ -47,9 +36,9 @@ else
 fi
 
 # =================================================================
-# 步驟 3：寫入硬體定義 (DTS, 網路, 設備規則)
+# 步驟 3：寫入硬體定義 (全新策略)
 # =================================================================
-log_info "步驟 3：寫入硬體定義..."
+log_info "步驟 3：寫入硬體定義 (全新策略)..."
 
 # --- 寫入 DTS 文件 ---
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
@@ -322,56 +311,32 @@ boot_hook_add preinit_main ipq40xx_board_detect
 EOF
 log_success "網絡配置文件創建完成。"
 
-# --- 配置設備規則 ---
+# --- ✅ 關鍵修正：直接修改現有設備規則，而不是新增 ---
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
-if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
-    cat <<EOF >> "$GENERIC_MK"
-
-define Device/mobipromo_cm520-79f
-  DEVICE_VENDOR := MobiPromo
-  DEVICE_MODEL := CM520-79F
-  DEVICE_DTS := qcom-ipq4019-cm520-79f
-  KERNEL_SIZE := 4096k
-  ROOTFS_SIZE := 16384k
-  IMAGE_SIZE := 81920k
-  IMAGE/trx := append-kernel | pad-to \$(KERNEL_SIZE) | append-rootfs | trx -o \$@
-endef
-TARGET_DEVICES += mobipromo_cm520-79f
-EOF
-    log_success "設備規則添加完成。"
-else
-    sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
-    log_info "設備規則已存在，更新 IMAGE_SIZE。"
-fi
+log_info "正在修改 '$GENERIC_MK' 以支援 CM520-79F..."
+# 我們選擇一個官方支援的、最基礎的設備（如 GL.iNet GL-B1300）作為模板
+# 然後用 sed 命令把它替換成我們的設備資訊
+sed -i 's/glinet,gl-b1300/mobipromo,cm520-79f/g' "$GENERIC_MK"
+sed -i 's/GL.iNet GL-B1300/MobiPromo CM520-79F/g' "$GENERIC_MK"
+sed -i 's/qcom-ipq4019-gl-b1300.dts/qcom-ipq4019-cm520-79f.dts/g' "$GENERIC_MK"
+log_success "設備規則修改完成。"
 
 # =================================================================
 # 步驟 4：生成最終配置文件 .config
 # =================================================================
 log_info "步驟 4：生成最終 .config 文件..."
-
-# --- 創建一個全新的 .config ---
-# ✅ 關鍵修復：確保我們從一個乾淨的狀態開始
 rm -f .config .config.old
 touch .config
 
 # --- 基礎配置：選擇目標平台和設備 ---
-# ✅ 關鍵修復：這是解決「目標設備未啟用」問題的核心
-log_info "正在設定目標平台和設備..."
 echo "CONFIG_TARGET_ipq40xx=y" >> .config
 echo "CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y" >> .config
-log_success "目標平台和設備設定完成。"
 
 # --- 軟體包配置 ---
-log_info "正在設定軟體包..."
-# 在這裡加入您所有需要的軟體包
+echo "CONFIG_PACKAGE_luci=y" >> .config
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
-# ... 其他您需要的軟體包，例如:
-# echo "CONFIG_PACKAGE_luci-app-ddns=y" >> .config
-# echo "CONFIG_PACKAGE_kmod-usb-storage=y" >> .config
-log_success "軟體包設定完成。"
 
 # --- 執行 make defconfig ---
-# ✅ 關鍵步驟：基於我們上面提供的最簡配置，自動補完所有依賴，生成最終的完整 .config
 log_info "正在執行 'make defconfig' 來生成完整配置..."
 make defconfig
 log_success "最終 .config 文件生成完成。"
