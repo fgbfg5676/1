@@ -28,17 +28,16 @@ jobs:
 
       - name: Save New Commit Hash
         if: steps.cacheHash.outputs.cache-hit != 'true'
-        run: |
-          echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+        run: echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
 
       - name: Trigger build
         if: steps.cacheHash.outputs.cache-hit != 'true'
         uses: peter-evans/repository-dispatch@v2
         with:
           token: ${{ secrets.TARGET_REPO_PAT }}
-          repository: ${{ env.TARGET_REPO }}
-          event-type: Source Code Update
-          client-payload: {}
+          repository: fgbfg5676/immortalwrt
+          event-type: "Source Code Update"
+          client-payload: "{}"
 
       - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@v2
