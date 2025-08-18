@@ -6,7 +6,17 @@
 #
 
 # --- 啟用嚴格模式，任何錯誤立即終止 ---
-set -e
+set -euxo pipefail
+
+# ✅ 默认工作目录
+WORKDIR="${WORKDIR:-/workdir}"
+
+echo "Step 1: Define base variables..."
+echo "WORKDIR is set to: $WORKDIR"
+
+echo "Step 2: Create necessary directories..."
+mkdir -p "$WORKDIR"
+mkdir -p "$WORKDIR/openwrt"
 
 # -------------------- 步驟 0：日誌函數 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -26,12 +36,15 @@ DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
+# ✅ 确保 AdGuardHome 路径有默认值，避免 mkdir 报错
+ADGUARD_CORE_DIR="${ADGUARD_CORE_DIR:-$WORKDIR/AdGuardHome}"
 log_success "基礎變量定義完成。"
 
 # -------------------- 步驟 2：創建必要的目錄 --------------------
 log_info "步驟 2：創建必要的目錄..."
 mkdir -p "$DTS_DIR" "$CUSTOM_PLUGINS_DIR" "$ADGUARD_CORE_DIR"
 log_success "目錄創建完成。"
+
 
 # -------------------- 步驟 3：寫入DTS文件 --------------------
 log_info "步驟 3：正在寫入100%正確的DTS文件..."
