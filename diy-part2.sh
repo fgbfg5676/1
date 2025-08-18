@@ -366,15 +366,7 @@ rm -f $CONFIG_FILE
 
 # --- 啟用sirpdboy插件 ---
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> $CONFIG_FILE
-# --- 啟用其他基礎依賴 ---
-echo "CONFIG_PACKAGE_kmod-ubi=y" >> $CONFIG_FILE
-echo "CONFIG_PACKAGE_kmod-ubifs=y" >> $CONFIG_FILE
-echo "CONFIG_PACKAGE_trx=y" >> $CONFIG_FILE
-echo "CONFIG_PACKAGE_kmod-ath10k-ct=y" >> $CONFIG_FILE
-echo "CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y" >> $CONFIG_FILE
-echo "CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y" >> $CONFIG_FILE
-echo "CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y" >> $CONFIG_FILE
-echo "CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y" >> $CONFIG_FILE
+
 
 # 將自定義配置合併到 .config
 cat $CONFIG_FILE >> .config
