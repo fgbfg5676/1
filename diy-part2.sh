@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# 最終防線版 diy-part2.sh (v45 - 手動創世)
-# 描述: 徹底繞過有缺陷的 make defconfig，手動創建最終的 .config 文件。
+# 最終防線版 diy-part2.sh (v47 - 純淨且完整)
+# 描述: 在純淨的基礎上，手動定義所有必需的驅動和軟體包，然後讓 make defconfig 補完。
 #
 
 # --- 啟用嚴格模式 ---
@@ -12,28 +12,22 @@ log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
-log_info "===== 開始執行 v45 版終極配置腳本 (手動創世) ====="
+log_info "===== 開始執行 v47 版純淨且完整腳本 ====="
 
 # =================================================================
-# 步驟 1：更新與安裝 Feeds (保持不變)
+# 步驟 1 & 2：Feeds 和插件 (保持不變)
 # =================================================================
-log_info "步驟 1：更新和安裝所有 Feeds..."
+log_info "步驟 1 & 2：處理 Feeds 和自訂插件..."
 ./scripts/feeds update -a
 ./scripts/feeds install -a
-log_success "Feeds 操作完成。"
 
-# =================================================================
-# 步驟 2：下載自訂插件 (保持不變)
-# =================================================================
-log_info "步驟 2：下載自訂插件..."
 CUSTOM_PLUGINS_DIR="package/custom"
 mkdir -p "$CUSTOM_PLUGINS_DIR"
 if [ ! -d "$CUSTOM_PLUGINS_DIR/luci-app-partexp/.git" ]; then
   git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"
-  log_success "sirpdboy 插件克隆成功 。"
-else
-  log_info "sirpdboy 插件已存在，跳過克隆。"
 fi
+log_success "Feeds 和插件處理完成 。"
+
 
 # =================================================================
 # 步驟 3：寫入硬體定義 (保持不變)
@@ -331,84 +325,106 @@ else
     sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
     log_info "設備規則已存在，更新 IMAGE_SIZE。"
 fi
+log_success "硬體定義寫入完成。"
 
 # =================================================================
-# 步驟 4：手動創建最終 .config 文件
+# 步驟 4：生成最終配置文件 .config (純淨且完整)
 # =================================================================
-log_info "步驟 4：手動創建最終 .config 文件..."
+log_info "步驟 4：生成最終 .config 文件 (純淨且完整)..."
+
+# --- 關鍵核心：創建一個全新的、純淨的 .config 文件 ---
 rm -f .config .config.old
+touch .config
 
-# ✅ 關鍵核心：我們不再相信任何自動化，直接定義一個最小化的、絕對正確的配置
+# --- ✅ 關鍵修正：一次性寫入所有必需的配置 ---
 cat > .config <<'EOF'
 #
-# 基本目標配置
+# ========================================
+# 基本目標配置 (Target Configuration)
+# ========================================
 #
 CONFIG_TARGET_ipq40xx=y
 CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y
 
 #
-# 固件選項
+# ========================================
+# 固件與檔案系統 (Firmware & Filesystem)
+# ========================================
 #
-CONFIG_TARGET_ROOTFS_INITRAMFS=n
 CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_TARGET_SQUASHFS_BLOCK_SIZE=256
+CONFIG_TARGET_SQUASHFS_BLOCK_SIZE=1024
 CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
+# 啟用 TRX 格式固件打包工具
+CONFIG_PACKAGE_trx=y
 
 #
-# 核心系統
+# ========================================
+# 核心系統與驅動 (Core System & Drivers)
+# ========================================
 #
-CONFIG_PACKAGE_kmod-gpio-button-hotplug=y
-CONFIG_PACKAGE_kmod-leds-gpio=y
-CONFIG_PACKAGE_kmod-ledtrig-timer=y
-CONFIG_PACKAGE_kmod-ledtrig-usbport=y
+# UBI (Unsorted Block Images) 相關驅動，NAND Flash 必需
+CONFIG_PACKAGE_kmod-ubi=y
+CONFIG_PACKAGE_kmod-ubifs=y
 
 #
-# LuCI 網頁介面
+# 無線驅動 (Wireless Drivers)
+#
+CONFIG_PACKAGE_kmod-ath10k-ct=y
+CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y
+# 這個包提供了 ipq40xx 平台的 WiFi 校準數據和板級數據
+CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y
+
+#
+# ========================================
+# LuCI 網頁介面 (LuCI Web Interface)
+# ========================================
 #
 CONFIG_PACKAGE_luci=y
 CONFIG_PACKAGE_luci-base=y
 CONFIG_PACKAGE_luci-mod-status=y
 CONFIG_PACKAGE_luci-mod-system=y
-CONFIG_package_luci-app-firewall=y
-CONFIG_package_luci-proto-ipv6=y
-CONFIG_package_luci-proto-ppp=y
+CONFIG_PACKAGE_luci-app-firewall=y
+CONFIG_PACKAGE_luci-proto-ipv6=y
+CONFIG_PACKAGE_luci-proto-ppp=y
 CONFIG_PACKAGE_luci-theme-bootstrap=y
 
 #
-# 您需要的客製化軟體包
+# ========================================
+# 您需要的客製化軟體包 (Custom Packages)
+# ========================================
 #
 CONFIG_PACKAGE_luci-app-partexp=y
 
 #
-# 無線驅動
+# ========================================
+# 網路工具 (Networking Utilities)
+# ========================================
 #
-CONFIG_PACKAGE_kmod-ath10k-ct=y
-CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y
-CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y
+# 選擇包含 DHCPv6 功能的 dnsmasq-full
+CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y
+# 禁用預設的 dnsmasq，避免衝突
+# CONFIG_PACKAGE_dnsmasq is not set
 
 #
-# 網路工具
+# ========================================
+# 其他重要選項 (Other Important Options)
+# ========================================
 #
-CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y
+# 允許 rootfs 分區大小超過內核檢查限制，對於大容量 Flash 很重要
+CONFIG_TARGET_ROOTFS_PARTSIZE_FIXED=y
 EOF
 
-log_success "最終 .config 文件手動創建完成。"
+log_success "最小化 .config 文件手動創建完成。"
+
+# --- 執行 make defconfig 來補完所有深層次依賴 ---
+log_info "正在執行 'make defconfig' 來生成完整配置..."
+make defconfig
+log_success "最終 .config 文件生成完成。"
 
 # =================================================================
-# 步驟 5：執行 'make menuconfig' 的非互動式等價命令
+# 步驟 5：最終驗證
 # =================================================================
-# ✅ 關鍵核心：我們不再使用有問題的 'make defconfig'
-# 我們使用 'make menuconfig' 的腳本化版本來讀取我們的 .config 並補完所有深層依賴
-# 這是在非互動式環境下最可靠的配置方法
-log_info "正在執行 'make menuconfig' 的腳本化版本來補完依賴..."
-make menuconfig
-log_success "依賴補完完成。"
-
-
-# =================================================================
-# 步驟 6：最終驗證
-# =================================================================
-log_info "步驟 6：最終驗證 .config 文件..."
+log_info "步驟 5：最終驗證 .config 文件..."
 if ! grep -q "CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y" .config; then
     log_error "最終驗證失敗：目標設備 mobipromo_cm520-79f 未被啟用！"
 fi
