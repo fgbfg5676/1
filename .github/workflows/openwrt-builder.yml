@@ -1,3 +1,22 @@
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+#
+# File: .github/workflows/openwrt-builder.yml
+# Description: Build OpenWrt using GitHub Actions
+#
+# Copyright (c ) 2019-2024 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+name: OpenWrt Builder
+
+on:
+  repository_dispatch:
+    types: [Source Code Update]
+  workflow_dispatch:
+
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
@@ -10,7 +29,7 @@ env:
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
   TARGET_REPO: fgbfg5676/immortalwrt
-  WORKDIR: /workdir   # ✅ 添加默认工作目录
+  WORKDIR: /workdir   # ✅ 在這裡定義一次即可
 
 jobs:
   build:
@@ -22,9 +41,10 @@ jobs:
 
     - name: Initialization environment
       env:
+        # ✅ 修正點：移除了無效的 WORKDIR 引用
         DEBIAN_FRONTEND: noninteractive
-        WORKDIR: ${{ env.WORKDIR }}
       run: |
+        # ✅ 在 run 腳本中 ，可以直接使用 $WORKDIR，因為它繼承自 job 層級的 env
         echo "Workspace: $GITHUB_WORKSPACE"
         echo "Workdir: $WORKDIR"
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -36,3 +56,14 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p "$WORKDIR"
         sudo chown $USER:$GROUPS "$WORKDIR"
+
+    - name: Clone source code
+      # ✅ working-directory 可以直接使用 env 上下文
+      working-directory: ${{ env.WORKDIR }}
+      run: |
+        df -hT $PWD
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf ${{ env.WORKDIR }}/openwrt $GITHUB_WORKSPACE/openwrt
+
+    # ... 後續步驟保持不變 ...
+    # (請將您完整的後續步驟貼在下方)
