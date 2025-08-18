@@ -26,8 +26,6 @@ DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 CUSTOM_PLUGINS_DIR="package/custom"
-# --- 關鍵：定義AdGuardHome核心最終應該在的位置 ---
-ADGUARD_CORE_DIR="package/base-files/files/usr/bin"
 log_success "基礎變量定義完成。"
 
 # -------------------- 步驟 2：創建必要的目錄 --------------------
@@ -328,22 +326,6 @@ else
     log_info "设备规则已存在，更新IMAGE_SIZE。"
 fi
 
-# -------------------- 步驟 6：AdGuardHome集成（手動放置方案） --------------------
-log_info "步驟 6：正在手動下載並放置 AdGuardHome 核心..."
-AGH_URL=$(curl -fsSL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | \
-                  grep "browser_download_url.*linux_${ARCH}.tar.gz" | \
-                  cut -d '"' -f 4 )
-if [ -z "$AGH_URL" ]; then
-    log_error "獲取 AdGuardHome 下載鏈接失敗！"
-fi
-
-log_info "獲取到下載鏈接: $AGH_URL"
-wget --show-progress -O /tmp/AdGuardHome.tar.gz "$AGH_URL"
-tar -xzf /tmp/AdGuardHome.tar.gz -C /tmp
-cp /tmp/AdGuardHome/AdGuardHome "$ADGUARD_CORE_DIR/"
-chmod +x "$ADGUARD_CORE_DIR/AdGuardHome"
-rm -rf /tmp/AdGuardHome*
-log_success "AdGuardHome 核心已成功放置到 $ADGUARD_CORE_DIR/AdGuardHome"
 
 # -------------------- 步驟 7：sirpdboy插件集成 --------------------
 log_info "步驟 7：集成sirpdboy插件..."
@@ -369,8 +351,6 @@ log_info "步驟 9：正在啟用必要的軟件包並生成最終配置..."
 CONFIG_FILE=".config.custom"
 rm -f $CONFIG_FILE
 
-# --- 關鍵：我們只啟用luci界面，核心文件已經手動放置 ---
-echo "CONFIG_PACKAGE_luci-app-adguardhome=y" >> $CONFIG_FILE
 # --- 啟用sirpdboy插件 ---
 echo "CONFIG_PACKAGE_luci-app-partexp=y" >> $CONFIG_FILE
 # --- 啟用其他基礎依賴 ---
