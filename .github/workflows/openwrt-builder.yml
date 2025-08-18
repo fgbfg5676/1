@@ -118,12 +118,16 @@ jobs:
 
     - name: Organize files
       id: organize
+      # ✅ 關鍵修正：為這個步驟指定正確的工作目錄
+      working-directory: ${{ env.WORKDIR }}
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
+        # 現在，當前目錄就是 /workdir，所以可以直接 cd 到 openwrt 子目錄
         cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
+
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
