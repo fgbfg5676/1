@@ -4,6 +4,11 @@
 # File: .github/workflows/update-checker.yml
 # Description: Source code update checker
 #
+# Copyright (c) 2019-2025 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
 
 name: Update Checker
 
@@ -22,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
     - name: Get Commit Hash
       id: getHash
       run: |
@@ -44,10 +50,10 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.immortalwrt }}           # ✅ 使用你的 PAT secret
-        repository: ${{ env.TARGET_REPO }}          # ✅ 指向你的 fork 仓库
-        event-type: "Source Code Update"            # ✅ 引号避免 YAML 解析问题
-        client-payload: "{}"                        # ✅ 空 payload
+        token: ${{ secrets.pat }}               # ✅ 使用你的 PAT secret
+        repository: ${{ env.TARGET_REPO }}      # ✅ 你的 fork 仓库
+        event-type: "Source Code Update"
+        client-payload: "{}"
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
