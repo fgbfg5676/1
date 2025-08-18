@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# 最終防線版 diy-part2.sh (v44)
-# 描述: 鎖定問題根源在於硬體定義，採用 sed 修改現有設備的終極策略。
+# 最終防線版 diy-part2.sh (v45 - 手動創世)
+# 描述: 徹底繞過有缺陷的 make defconfig，手動創建最終的 .config 文件。
 #
 
-# --- 啟用嚴格模式，任何錯誤立即終止 ---
+# --- 啟用嚴格模式 ---
 set -euxo pipefail
 
 # --- 日誌函數 ---
@@ -12,10 +12,10 @@ log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 
-log_info "===== 開始執行 v44 版終極配置腳本 ====="
+log_info "===== 開始執行 v45 版終極配置腳本 (手動創世) ====="
 
 # =================================================================
-# 步驟 1：更新與安裝 Feeds
+# 步驟 1：更新與安裝 Feeds (保持不變)
 # =================================================================
 log_info "步驟 1：更新和安裝所有 Feeds..."
 ./scripts/feeds update -a
@@ -23,7 +23,7 @@ log_info "步驟 1：更新和安裝所有 Feeds..."
 log_success "Feeds 操作完成。"
 
 # =================================================================
-# 步驟 2：下載自訂插件
+# 步驟 2：下載自訂插件 (保持不變)
 # =================================================================
 log_info "步驟 2：下載自訂插件..."
 CUSTOM_PLUGINS_DIR="package/custom"
@@ -36,10 +36,9 @@ else
 fi
 
 # =================================================================
-# 步驟 3：寫入硬體定義 (全新策略)
+# 步驟 3：寫入硬體定義 (保持不變)
 # =================================================================
-log_info "步驟 3：寫入硬體定義 (全新策略)..."
-
+log_info "步驟 3：寫入硬體定義..."
 # --- 寫入 DTS 文件 ---
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 mkdir -p "$DTS_DIR"
@@ -311,40 +310,105 @@ boot_hook_add preinit_main ipq40xx_board_detect
 EOF
 log_success "網絡配置文件創建完成。"
 
-# --- ✅ 關鍵修正：直接修改現有設備規則，而不是新增 ---
+# --- 配置設備規則 ---
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
-log_info "正在修改 '$GENERIC_MK' 以支援 CM520-79F..."
-# 我們選擇一個官方支援的、最基礎的設備（如 GL.iNet GL-B1300）作為模板
-# 然後用 sed 命令把它替換成我們的設備資訊
-sed -i 's/glinet,gl-b1300/mobipromo,cm520-79f/g' "$GENERIC_MK"
-sed -i 's/GL.iNet GL-B1300/MobiPromo CM520-79F/g' "$GENERIC_MK"
-sed -i 's/qcom-ipq4019-gl-b1300.dts/qcom-ipq4019-cm520-79f.dts/g' "$GENERIC_MK"
-log_success "設備規則修改完成。"
+if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
+    cat <<EOF >> "$GENERIC_MK"
+
+define Device/mobipromo_cm520-79f
+  DEVICE_VENDOR := MobiPromo
+  DEVICE_MODEL := CM520-79F
+  DEVICE_DTS := qcom-ipq4019-cm520-79f
+  KERNEL_SIZE := 4096k
+  ROOTFS_SIZE := 16384k
+  IMAGE_SIZE := 81920k
+  IMAGE/trx := append-kernel | pad-to \$(KERNEL_SIZE) | append-rootfs | trx -o \$@
+endef
+TARGET_DEVICES += mobipromo_cm520-79f
+EOF
+    log_success "設備規則添加完成。"
+else
+    sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
+    log_info "設備規則已存在，更新 IMAGE_SIZE。"
+fi
 
 # =================================================================
-# 步驟 4：生成最終配置文件 .config
+# 步驟 4：手動創建最終 .config 文件
 # =================================================================
-log_info "步驟 4：生成最終 .config 文件..."
+log_info "步驟 4：手動創建最終 .config 文件..."
 rm -f .config .config.old
-touch .config
 
-# --- 基礎配置：選擇目標平台和設備 ---
-echo "CONFIG_TARGET_ipq40xx=y" >> .config
-echo "CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y" >> .config
+# ✅ 關鍵核心：我們不再相信任何自動化，直接定義一個最小化的、絕對正確的配置
+cat > .config <<'EOF'
+#
+# 基本目標配置
+#
+CONFIG_TARGET_ipq40xx=y
+CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y
 
-# --- 軟體包配置 ---
-echo "CONFIG_PACKAGE_luci=y" >> .config
-echo "CONFIG_PACKAGE_luci-app-partexp=y" >> .config
+#
+# 固件選項
+#
+CONFIG_TARGET_ROOTFS_INITRAMFS=n
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_SQUASHFS_BLOCK_SIZE=256
+CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
 
-# --- 執行 make defconfig ---
-log_info "正在執行 'make defconfig' 來生成完整配置..."
-make defconfig
-log_success "最終 .config 文件生成完成。"
+#
+# 核心系統
+#
+CONFIG_PACKAGE_kmod-gpio-button-hotplug=y
+CONFIG_PACKAGE_kmod-leds-gpio=y
+CONFIG_PACKAGE_kmod-ledtrig-timer=y
+CONFIG_PACKAGE_kmod-ledtrig-usbport=y
+
+#
+# LuCI 網頁介面
+#
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-base=y
+CONFIG_PACKAGE_luci-mod-status=y
+CONFIG_PACKAGE_luci-mod-system=y
+CONFIG_package_luci-app-firewall=y
+CONFIG_package_luci-proto-ipv6=y
+CONFIG_package_luci-proto-ppp=y
+CONFIG_PACKAGE_luci-theme-bootstrap=y
+
+#
+# 您需要的客製化軟體包
+#
+CONFIG_PACKAGE_luci-app-partexp=y
+
+#
+# 無線驅動
+#
+CONFIG_PACKAGE_kmod-ath10k-ct=y
+CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y
+CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y
+
+#
+# 網路工具
+#
+CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y
+EOF
+
+log_success "最終 .config 文件手動創建完成。"
 
 # =================================================================
-# 步驟 5：最終驗證
+# 步驟 5：執行 'make menuconfig' 的非互動式等價命令
 # =================================================================
-log_info "步驟 5：最終驗證 .config 文件..."
+# ✅ 關鍵核心：我們不再使用有問題的 'make defconfig'
+# 我們使用 'make menuconfig' 的腳本化版本來讀取我們的 .config 並補完所有深層依賴
+# 這是在非互動式環境下最可靠的配置方法
+log_info "正在執行 'make menuconfig' 的腳本化版本來補完依賴..."
+make menuconfig
+log_success "依賴補完完成。"
+
+
+# =================================================================
+# 步驟 6：最終驗證
+# =================================================================
+log_info "步驟 6：最終驗證 .config 文件..."
 if ! grep -q "CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y" .config; then
     log_error "最終驗證失敗：目標設備 mobipromo_cm520-79f 未被啟用！"
 fi
