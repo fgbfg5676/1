@@ -1,65 +1,60 @@
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+#
+# File: .github/workflows/update-checker.yml
+# Description: Source code update checker
+#
+# Copyright (c ) 2019-2024 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
 name: Update Checker
+
 env:
+  # 將這裡的 URL 和分支修改為 ImmortalWRT 的
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt   # 🔴 指向你的 fork 仓库
-  UPSTREAM_REPO: immortalwrt/immortalwrt
+
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */18 * * *'   # 每18小时检查一次更新
+#  schedule:
+#    - cron: 0 */18 * * *
+
 jobs:
   check:
     runs-on: ubuntu-latest
+
     steps:
-    - name: Get Upstream Commit Hash
+
+    - name: Get Commit Hash
       id: getHash
       run: |
-        echo "commitHash=$(git ls-remote $REPO_URL refs/heads/$REPO_BRANCH | cut -f1)" >> $GITHUB_OUTPUT
-    
-    - name: Check for New Commits
-      id: checkCommits
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH .
+        echo "commitHash=$(git rev-parse HEAD )" >> $GITHUB_OUTPUT
+
+    - name: Compare Commit Hash
+      id: cacheHash
       uses: actions/cache@v3
       with:
         path: .commitHash
-        key: upstream-commit-${{ steps.getHash.outputs.commitHash }}
-        restore-keys: |
-          upstream-commit-
-    
+        key: commitHash_${{ steps.getHash.outputs.commitHash }}
+
     - name: Save New Commit Hash
-      if: steps.checkCommits.outputs.cache-hit != 'true'
+      if: steps.cacheHash.outputs.cache-hit != 'true'
       run: |
-        echo "${{ steps.getHash.outputs.commitHash }}" > .commitHash
-    
-    - name: Trigger Build Workflow
-      if: steps.checkCommits.outputs.cache-hit != 'true'
-      uses: peter-evans/repository-dispatch@v3
+        echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+
+    - name: Trigger build
+      if: steps.cacheHash.outputs.cache-hit != 'true'
+      uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.TARGET_REPO_PAT }}   # 🔴 使用 PAT
-        repository: ${{ env.TARGET_REPO }}
-        event-type: "Source Code Update"
-        client-payload: |
-          {
-            "upstream_repo": "${{ env.UPSTREAM_REPO }}",
-            "upstream_branch": "${{ env.REPO_BRANCH }}",
-            "commit_hash": "${{ steps.getHash.outputs.commitHash }}"
-          }
-    
-    - name: Cleanup Old Workflow Runs
+        token: ${{ github.token }}
+        event-type: Source Code Update
+
+    - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
       with:
-        retain_days: 1
-        keep_minimum_runs: 3
-    
-    # 可选：如果设置了 SLACK_WEBHOOK_URL，保留此步骤
-    - name: Notify Update Status
-      if: always()
-      uses: 8398a7/action-slack@v3
-      with:
-        status: ${{ job.status }}
-        fields: repo,message,commit,author,action,eventName,ref,workflow
-        text: |
-          Update check ${{ job.status }}
-          ${{ steps.checkCommits.outputs.cache-hit != 'true' && 'New update found and build triggered!' || 'No new updates found.' }}
-      env:
-        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        retain_days: 0
+        keep_minimum_runs: 2
