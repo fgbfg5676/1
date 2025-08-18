@@ -4,18 +4,13 @@
 # File: .github/workflows/update-checker.yml
 # Description: Source code update checker
 #
-# Copyright (c) 2019-2025 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
 
 name: Update Checker
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/immortalwrt
+  TARGET_REPO: fgbfg5676/immortalwrt   # ✅ 指向你的 fork 仓库
 
 on:
   workflow_dispatch:
@@ -27,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
     - name: Get Commit Hash
       id: getHash
       run: |
@@ -50,10 +44,10 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.pat }}               # ✅ 使用你的 PAT secret
-        repository: ${{ env.TARGET_REPO }}      # ✅ 你的 fork 仓库
-        event-type: "Source Code Update"
-        client-payload: "{}"
+        token: ${{ secrets.PAT }}                     # ✅ 使用你存的 PAT
+        repository: ${{ env.TARGET_REPO }}           # ✅ 指向你的 fork
+        event-type: "Source Code Update"             # ✅ 加引号
+        client-payload: "{}"                         # ✅ 明确传空 payload
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
