@@ -1,19 +1,15 @@
 #
 # https://github.com/P3TERX/Actions-OpenWrt
 #
-# File: .github/workflows/openwrt-bulder.yml
-# Description: Build OpenWrt using GitHub Actions
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
+# File: .github/workflows/openwrt-builder.yml
+# Description: Build OpenWrt using GitHub Actions with PAT
 #
 
 name: OpenWrt Builder
 
 on:
   repository_dispatch:
+    types: [Source Code Update]
   workflow_dispatch:
 
 env:
@@ -27,12 +23,22 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  TARGET_REPO: fgbfg5676/immortalwrt
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
+    - name: Check PAT secret
+      run: |
+        if [ -z "${{ secrets.PAT }}" ]; then
+          echo "❌ secrets.PAT is not set. Terminating workflow."
+          exit 1
+        else
+          echo "✅ PAT found, continuing workflow."
+        fi
+
     - name: Checkout
       uses: actions/checkout@main
 
@@ -131,14 +137,13 @@ jobs:
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
-        [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
-      uses: softprops/action-gh-release@master
+      uses: softprops/action-gh-release@v1
       if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.PAT }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
@@ -147,14 +152,15 @@ jobs:
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@main
       with:
+        token: ${{ secrets.PAT }}
         retain_days: 0
         keep_minimum_runs: 2
 
     - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@master
+      uses: dev-drprasad/delete-older-releases@v0.2.0
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 3
         delete_tags: true
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.PAT }}
