@@ -1,10 +1,10 @@
 #
 # https://github.com/P3TERX/Actions-OpenWrt
 #
-# File: .github/workflows/openwrt-builder.yml
+# File: .github/workflows/openwrt-bulder.yml
 # Description: Build OpenWrt using GitHub Actions
 #
-# Copyright (c ) 2019-2024 P3TERX <https://p3terx.com>
+# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
 #
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
@@ -14,11 +14,10 @@ name: OpenWrt Builder
 
 on:
   repository_dispatch:
-    types: [Source Code Update]
   workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
+  REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
@@ -28,9 +27,6 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  TARGET_REPO: fgbfg5676/immortalwrt
-  # ✅ 保留您習慣的 WORKDIR 變數
-  WORKDIR: /workdir
 
 jobs:
   build:
@@ -42,10 +38,8 @@ jobs:
 
     - name: Initialization environment
       env:
-        # ✅ 關鍵修正：移除了會導致 workflow 解析失敗的 `WORKDIR: ${{ env.WORKDIR }}`
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 在 run 腳本中 ，可以直接使用 $WORKDIR 和 $TZ，因為它們繼承自最上層的 env
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
         sudo docker image prune --all --force
         sudo -E apt-get -qq update
@@ -53,16 +47,15 @@ jobs:
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p "$WORKDIR"
-        sudo chown $USER:$GROUPS "$WORKDIR"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
 
     - name: Clone source code
-      # ✅ 保留您原有的 working-directory 和 run 腳本結構
-      working-directory: ${{ env.WORKDIR }}
+      working-directory: /workdir
       run: |
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf ${{ env.WORKDIR }}/openwrt $GITHUB_WORKSPACE/openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: Load custom feeds
       run: |
@@ -118,16 +111,12 @@ jobs:
 
     - name: Organize files
       id: organize
-      # ✅ 關鍵修正：為這個步驟指定正確的工作目錄
-      working-directory: ${{ env.WORKDIR }}
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
-        # 現在，當前目錄就是 /workdir，所以可以直接 cd 到 openwrt 子目錄
         cd openwrt/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
-
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
@@ -142,14 +131,14 @@ jobs:
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
+        [ ${UPLOAD_GOFILE} = true && ${{ steps.gofile.outputs.url }} ] && echo "🔗 [GoFile](${{ steps.gofile.outputs.url }})" >> release.txt
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
-      # ✅ 修正：使用穩定版本 v1，並用 PAT 確保權限
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@master
       if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
-        GITHUB_TOKEN: ${{ secrets.PAT }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
@@ -158,17 +147,14 @@ jobs:
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@main
       with:
-        # ✅ 修正：使用擁有權限的 PAT 避免權限錯誤
-        token: ${{ secrets.PAT }}
         retain_days: 0
         keep_minimum_runs: 2
 
     - name: Remove old Releases
-      # ✅ 修正：使用穩定版本 v0.2.0，並用 PAT 確保權限
-      uses: dev-drprasad/delete-older-releases@v0.2.0
+      uses: dev-drprasad/delete-older-releases@master
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 3
         delete_tags: true
       env:
-        GITHUB_TOKEN: ${{ secrets.PAT }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
