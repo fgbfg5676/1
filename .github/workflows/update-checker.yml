@@ -15,7 +15,6 @@ name: Update Checker
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
-  TARGET_REPO: fgbfg5676/1   # 目标仓库
 
 on:
   workflow_dispatch:
@@ -46,17 +45,10 @@ jobs:
       run: |
         echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
 
-    - name: Trigger build in target repo
+    - name: Trigger build
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.PAT_TOKEN }}       # 使用 PAT
-        repository: ${{ env.TARGET_REPO }}   # 目标仓库
+        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         event-type: Source Code Update
-        client-payload: {}
-
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@v2
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
+        client-payload: '{}'
