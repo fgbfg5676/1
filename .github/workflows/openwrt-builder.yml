@@ -4,11 +4,6 @@
 # File: .github/workflows/openwrt-builder.yml
 # Description: Build OpenWrt using GitHub Actions
 #
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
 
 name: OpenWrt Builder
 
@@ -104,7 +99,7 @@ jobs:
       run: df -hT
 
     - name: Upload bin directory
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
@@ -120,7 +115,7 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware directory
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
