@@ -1,8 +1,8 @@
 #!/bin/bash
 # 最终解决方案脚本 - 完整改进版
 # 描述: 整合OpenWrt预编译配置与插件集成功能，移除AdGuardHome和sirpdboy插件
-# --- 启用严格模式，任何错误立即终止 ---
-set -e
+# --- 启用增强严格模式（覆盖更多错误场景） ---
+set -euo pipefail  # 替换原有的 set -e，增加对未定义变量、管道错误的检测
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -18,6 +18,8 @@ fatal_error() {
 
 # -------------------- 环境检查 --------------------
 log_info "===== 开始环境检查 ====="
+# 局部启用命令打印（环境检查涉及多个命令，便于排查依赖缺失）
+set -x
 if [ ! -f "scripts/feeds" ] || [ ! -f "Config.in" ]; then
     fatal_error "请在OpenWrt源码根目录执行此脚本"
 fi
@@ -33,6 +35,7 @@ done
 if ! timeout 3 curl -Is https://github.com >/dev/null 2>&1; then
     log_warning "网络连接可能存在问题，插件克隆可能失败"
 fi
+set +x  # 关闭命令打印
 log_success "环境检查通过"
 
 # =================== 预编译配置阶段 (Pre-Compile) ==================
@@ -49,11 +52,16 @@ log_success "基础变量定义完成。"
 
 # -------------------- 步骤 2：创建必要的目录 --------------------
 log_info "步骤 2：创建必要的目录..."
+# 目录创建可能因权限失败，启用命令打印
+set -x
 mkdir -p "$DTS_DIR" "$CUSTOM_PLUGINS_DIR"
+set +x
 log_success "目录创建完成。"
 
 # -------------------- 步骤 3：写入DTS文件 --------------------
 log_info "步骤 3：正在写入DTS文件..."
+# 文件写入涉及重定向，启用命令打印
+set -x
 cat > "$DTS_FILE" <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
@@ -286,11 +294,14 @@ cat > "$DTS_FILE" <<'EOF'
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
+set +x
 log_success "DTS文件写入成功。"
 
 # -------------------- 步骤 4：创建网络配置文件 --------------------
 log_info "步骤 4：创建针对 CM520-79F 的网络配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
+# 网络配置文件创建，启用命令打印
+set -x
 mkdir -p "$BOARD_DIR"
 cat > "$BOARD_DIR/02_network" <<EOF
 #!/bin/sh
@@ -306,10 +317,13 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
+set +x
 log_success "网络配置文件创建完成。"
 
 # -------------------- 步骤 5：配置设备规则 --------------------
 log_info "步骤 5：配置设备规则..."
+# 设备规则修改可能涉及sed，启用命令打印
+set -x
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
 define Device/mobipromo_cm520-79f
@@ -328,6 +342,7 @@ else
     sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
     log_info "设备规则已存在，更新IMAGE_SIZE。"
 fi
+set +x
 
 # -------------------- 通用函数 --------------------
 add_config() {
@@ -376,6 +391,7 @@ fetch_plugin() {
     [ -n "$CUSTOM_PLUGINS_DIR" ] && cleanup_paths+=("${CUSTOM_PLUGINS_DIR}/${plugin_name}")
     
     # 逐一清理，记录失败但不中断
+    set -x  # 清理步骤易出错，启用命令打印
     for path in "${cleanup_paths[@]}"; do
         if [ -d "$path" ]; then
             log_info "清理路径: $path"
@@ -394,15 +410,18 @@ fetch_plugin() {
             fi
         fi
     done
+    set +x
     
     # 验证网络连接和仓库可访问性
     log_info "检查仓库连接性: $repo"
+    set -x
     if ! timeout 30 git ls-remote --heads "$repo" >/dev/null 2>&1; then
         log_error "无法访问仓库: $repo"
         log_error "可能的原因: 1) 网络问题 2) 仓库不存在 3) 权限不足"
         flock -u 200
         return 1
     fi
+    set +x
     
     # 克隆重试逻辑
     while [ $retry_count -lt $max_retries ]; do
@@ -416,6 +435,7 @@ fetch_plugin() {
         export GIT_TERMINAL_PROMPT=0
         export GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
         
+        set -x  # 克隆命令易失败，启用详细打印
         if timeout 180 git clone --depth 1 --single-branch --progress "$repo" "$temp_dir" 2>&1 | \
            while IFS= read -r line; do
                echo "[GIT] $line"
@@ -438,6 +458,7 @@ fetch_plugin() {
                 sleep $wait_time
             fi
         fi
+        set +x
     done
     
     if [ $success -eq 0 ]; then
@@ -454,6 +475,7 @@ fetch_plugin() {
     fi
     
     # 验证源路径存在
+    set -x
     if [ ! -d "$source_path" ]; then
         log_error "${plugin_name} 源目录不存在: $source_path"
         log_info "临时目录内容:"
@@ -463,8 +485,10 @@ fetch_plugin() {
         flock -u 200
         return 1
     fi
+    set +x
     
     # 查找 Makefile
+    set -x
     if [ ! -f "$source_path/Makefile" ]; then
         log_warning "${plugin_name} 在 $source_path 中未找到 Makefile，搜索子目录..."
         local found_makefile=$(find "$source_path" -maxdepth 3 -name Makefile -type f -print -quit)
@@ -480,12 +504,16 @@ fetch_plugin() {
             return 1
         fi
     fi
+    set +x
     
     # 确保目标目录存在
+    set -x
     mkdir -p "package"
+    set +x
     
     # 移动文件
     log_info "移动 ${plugin_name} 到 package/ 目录..."
+    set -x
     if ! mv "$source_path" "package/$plugin_name" 2>&1; then
         log_error "${plugin_name} 移动失败"
         log_error "源路径: $source_path"
@@ -495,13 +523,17 @@ fetch_plugin() {
         flock -u 200
         return 1
     fi
+    set +x
     
     # 清理临时目录
+    set -x
     rm -rf "$temp_dir"
+    set +x
     
     # 配置依赖项
     if [ ${#deps[@]} -gt 0 ]; then
         log_info "配置 ${plugin_name} 依赖项: ${deps[*]}"
+        set -x
         for dep in "${deps[@]}"; do
             if [ -n "$dep" ]; then
                 if add_config "$dep"; then
@@ -511,9 +543,11 @@ fetch_plugin() {
                 fi
             fi
         done
+        set +x
     fi
     
     # 验证安装结果
+    set -x
     if [ -d "package/$plugin_name" ] && [ -f "package/$plugin_name/Makefile" ]; then
         log_success "${plugin_name} 集成成功"
         log_info "安装路径: package/$plugin_name"
@@ -525,6 +559,7 @@ fetch_plugin() {
         flock -u 200
         return 1
     fi
+    set +x
     
     # 释放锁
     flock -u 200
@@ -578,11 +613,12 @@ else
 fi
 
 # 恢复严格模式
-set -e
+set -euo pipefail  # 恢复增强严格模式
 
 # -------------------- 更新 feeds --------------------
 log_info "更新 feeds..."
 set +e  # 临时禁用严格模式
+set -x  # feeds操作易出错，启用命令打印
 if ./scripts/feeds update -a >/dev/null 2>&1; then
     log_success "Feeds 更新成功"
 else
@@ -604,12 +640,14 @@ else
         log_warning "Feeds 重试安装失败，但继续执行"
     fi
 fi
-set -e  # 重新启用严格模式
+set +x
+set -euo pipefail  # 重新启用增强严格模式
 
 # -------------------- 生成最终配置文件 --------------------
 log_info "正在启用必要的软件包并生成最终配置..."
 # 创建临时配置文件
 CONFIG_FILE=".config.custom"
+set -x
 rm -f $CONFIG_FILE
 
 # 添加基础依赖
@@ -633,7 +671,8 @@ if make defconfig 2>/dev/null; then
 else
     log_warning "make defconfig 执行有警告，但配置已生成"
 fi
-set -e
+set -euo pipefail  # 恢复增强严格模式
+set +x
 
 # -------------------- 验证插件 --------------------
 validation_passed=true
@@ -641,13 +680,16 @@ plugin_count=0
 
 verify_filesystem() {
     local plugin=$1
+    set -x
     if [ -d "package/$plugin" ] && [ -f "package/$plugin/Makefile" ]; then
         log_success "$plugin 目录和 Makefile 验证通过"
         ((plugin_count++))
+        set +x
         return 0
     else
         log_error "$plugin 目录或 Makefile 缺失"
         validation_passed=false
+        set +x
         return 1
     fi
 }
@@ -663,6 +705,7 @@ verify_configs() {
     local missing=0
     local found=0
     log_info "验证 $plugin_name 配置项..."
+    set -x
     for config in "${deps[@]}"; do
         if grep -q "^$config$" .config; then
             log_info "✅ $config"
@@ -672,6 +715,7 @@ verify_configs() {
             ((missing++))
         fi
     done
+    set +x
     if [ $missing -eq 0 ]; then
         log_success "$plugin_name 所有配置项验证通过 ($found/$((found + missing)))"
     else
@@ -686,6 +730,7 @@ verify_configs() {
 
 verify_feeds_visibility() {
     log_info "验证插件在 feeds 中的可见性..."
+    set -x
     local feeds_output
     if feeds_output=$(./scripts/feeds list 2>/dev/null); then
         if echo "$feeds_output" | grep -q "luci-app-openclash"; then
@@ -702,6 +747,7 @@ verify_feeds_visibility() {
     else
         log_warning "无法执行 feeds list 命令"
     fi
+    set +x
 }
 verify_feeds_visibility
 
@@ -711,7 +757,7 @@ log_info "===== 最终状态检查 ====="
 # 检查关键文件
 check_critical_files() {
     local files_ok=true
-    
+    set -x
     if [ -f "$DTS_FILE" ]; then
         log_success "DTS文件存在: $DTS_FILE"
     else
@@ -733,17 +779,20 @@ check_critical_files() {
         log_error "配置文件缺失或为空: .config"
         files_ok=false
     fi
-    
+    set +x
     return $files_ok
 }
 
 # 检查网络配置
 check_network_config() {
+    set -x
     if [ -f "$BOARD_DIR/02_network" ]; then
         log_success "网络配置文件存在"
+        set +x
         return 0
     else
         log_error "网络配置文件缺失"
+        set +x
         return 1
     fi
 }
@@ -770,18 +819,22 @@ fi
 
 # 显示配置统计
 log_info "配置文件统计:"
+set -x
 local total_configs=$(grep -c "^CONFIG_" .config 2>/dev/null || echo "0")
 local enabled_configs=$(grep -c "=y$" .config 2>/dev/null || echo "0")
 local disabled_configs=$(grep -c "=n$" .config 2>/dev/null || echo "0")
+set +x
 log_info "  - 总配置项: $total_configs"
 log_info "  - 已启用: $enabled_configs"
 log_info "  - 已禁用: $disabled_configs"
 
 # 显示重要的已启用配置
 log_info "重要的已启用配置:"
+set -x
 grep -E "CONFIG_PACKAGE_(luci-app-openclash|luci-app-passwall2|kmod-tun|dnsmasq-full)=y" .config 2>/dev/null | while read line; do
     log_info "  - $line"
 done
+set +x
 
 # -------------------- 故障排除建议 --------------------
 if ! $validation_passed; then
@@ -837,8 +890,10 @@ fi
 # 清理临时文件和锁文件
 cleanup_temp_files() {
     log_info "清理临时文件..."
+    set -x
     rm -f /tmp/.luci-app-*_lock 2>/dev/null || true
     rm -rf /tmp/luci-app-*_* 2>/dev/null || true
+    set +x
     log_success "临时文件清理完成"
 }
 
