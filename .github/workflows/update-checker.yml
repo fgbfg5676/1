@@ -15,6 +15,8 @@ name: Update Checker
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
+  # 使用有 workflow 权限的 PAT
+  PAT_TOKEN: ${{ secrets.REPO_DISPATCH_PAT }}
 
 on:
   workflow_dispatch:
@@ -49,15 +51,15 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.PAT_TOKEN }}
+        token: ${{ env.PAT_TOKEN }}
         event-type: Source_Code_Update
         repository: fgbfg5676/1
         client-payload: '{}'
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
+      env:
+        GITHUB_TOKEN: ${{ env.PAT_TOKEN }}  # 使用有 workflow 权限的 PAT
       with:
         retain_days: 0
         keep_minimum_runs: 2
-      env:
-        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
