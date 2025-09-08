@@ -1,22 +1,8 @@
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-#
-# File: .github/workflows/update-checker.yml
-# Description: Source code update checker
-#
-# Copyright (c) 2019-2025 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-
 name: Update Checker
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
-  # 使用有 workflow 权限的 PAT
-  PAT_TOKEN: ${{ secrets.REPO_DISPATCH_PAT }}
 
 on:
   workflow_dispatch:
@@ -26,9 +12,10 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write  # 添加工作流操作权限（关键）
 
     steps:
-
     - name: Get Commit Hash
       id: getHash
       run: |
@@ -51,15 +38,14 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ env.PAT_TOKEN }}
+        token: ${{ secrets.REPO_DISPATCH_PAT }}  # 保持仓库调度用的PAT
         event-type: Source_Code_Update
         repository: fgbfg5676/1
         client-payload: '{}'
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
-      env:
-        GITHUB_TOKEN: ${{ env.PAT_TOKEN }}  # 使用有 workflow 权限的 PAT
       with:
+        token: ${{ secrets.PAT_TOKEN }}  # 直接使用第二个secret（PAT_TOKEN）
         retain_days: 0
         keep_minimum_runs: 2
