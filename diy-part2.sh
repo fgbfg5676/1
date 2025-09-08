@@ -1,12 +1,12 @@
 #!/bin/bash
-# 增强调试版 - 解决无明显错误但脚本退出的问题
-# 核心改进：添加详细步骤日志、启用命令追踪、强化错误捕获
+# 最终修复版 - 解决 plugin_count 递增导致脚本退出的问题
+# 核心改进：使用兼容的数字递增方式，添加变量校验和详细调试
 
 # 启用基础严格模式，保留调试能力
-set -eo pipefail  # 保留 errexit 和 pipefail，移除 nounset 避免未定义变量导致退出
+set -eo pipefail  # 保留 errexit 和 pipefail，确保关键错误被捕获
 export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '  # 调试输出格式：文件名:行号
 
-# -------------------- 日志函数（增强步骤标记） --------------------
+# -------------------- 日志函数 --------------------
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }  # 步骤标记
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; }
@@ -14,12 +14,36 @@ log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }  # 调试日志
 
-# -------------------- 全局变量 --------------------
+# -------------------- 全局变量（确保正确初始化） --------------------
 validation_passed=true
-plugin_count=0
+plugin_count=0  # 明确初始化为数字0
 CONFIG_FILE=".config"
 CUSTOM_PLUGINS_DIR="package/custom"
 DEBUG_MODE=${DEBUG_MODE:-"true"}  # 默认启用调试模式
+
+# -------------------- 验证变量是否为有效数字 --------------------
+is_number() {
+    local var="$1"
+    if [[ "$var" =~ ^[0-9]+$ ]]; then
+        return 0  # 是有效数字
+    else
+        return 1  # 不是有效数字
+    fi
+}
+
+# -------------------- 安全递增插件计数 --------------------
+increment_plugin_count() {
+    # 检查当前值是否为有效数字
+    if ! is_number "$plugin_count"; then
+        log_error "plugin_count 不是有效数字（当前值: '$plugin_count'），将重置为0"
+        plugin_count=0
+    fi
+    
+    # 使用兼容的算术扩展递增（替代可能有问题的 ++）
+    local new_count=$((plugin_count + 1))
+    log_debug "plugin_count 从 $plugin_count 递增到 $new_count"
+    plugin_count="$new_count"
+}
 
 # -------------------- 插件集成函数 --------------------
 fetch_plugin() {
@@ -176,17 +200,25 @@ fetch_plugin() {
     fi
 }
 
-# -------------------- 验证文件系统函数 --------------------
+# -------------------- 验证文件系统函数（使用安全递增） --------------------
 verify_filesystem() {
     local plugin=$1
     log_step "验证 $plugin 文件系统"
+    
+    # 调试：输出当前 plugin_count 状态
+    log_debug "进入 verify_filesystem，当前 plugin_count: '$plugin_count'（类型: $(declare -p plugin_count 2>/dev/null)）"
     
     if [ -d "package/$plugin" ]; then
         log_debug "目录存在: package/$plugin"
         if [ -f "package/$plugin/Makefile" ]; then
             log_debug "Makefile存在: package/$plugin/Makefile"
             log_success "$plugin 目录和Makefile均存在"
-            ((plugin_count++))
+            
+            # 使用安全递增函数替代直接 ++
+            increment_plugin_count
+            
+            # 验证递增结果
+            log_debug "验证 $plugin 后，plugin_count 已更新为: $plugin_count"
             return 0
         else
             log_error "$plugin 目录存在，但缺少Makefile"
@@ -200,7 +232,7 @@ verify_filesystem() {
     return 0  # 即使失败也继续执行
 }
 
-# -------------------- 验证配置项函数（增强调试） --------------------
+# -------------------- 验证配置项函数 --------------------
 verify_configs() {
     local plugin_name="$1"
     shift
@@ -237,8 +269,6 @@ verify_configs() {
         else
             log_warning "第 $item_num 项: ❌ $config（.config中未找到）"
             ((missing++))
-            # 尝试添加缺失的配置项（可选）
-            # echo "$config" >> "$CONFIG_FILE" 2>/dev/null && log_info "已自动添加缺失项: $config"
         fi
     done
     set -e  # 恢复errexit
@@ -311,11 +341,14 @@ PASSWALL2_DEPS=(
     "CONFIG_PACKAGE_unzip=y"
 )
 
-# -------------------- 主流程（添加详细步骤追踪） --------------------
+# -------------------- 主流程 --------------------
 main() {
     log_step "开始OpenWrt插件集成与验证流程"
     
-    # 启用调试输出（根据环境变量控制）
+    # 调试：验证初始 plugin_count
+    log_debug "主流程开始，初始 plugin_count: '$plugin_count'（类型: $(declare -p plugin_count 2>/dev/null)）"
+    
+    # 启用调试输出
     if [ "$DEBUG_MODE" = "true" ]; then
         log_info "启用调试模式，将输出详细命令执行日志"
         set -x
@@ -348,15 +381,15 @@ main() {
         log_error "Passwall2 集成失败，将跳过其验证步骤"
     fi
     
-    # 验证插件文件系统
+    # 验证插件文件系统（关键步骤，使用安全递增）
     log_step "开始文件系统验证"
     verify_filesystem "luci-app-openclash"
-    log_debug "luci-app-openclash 文件系统验证完成，plugin_count=$plugin_count"
+    log_debug "OpenClash 文件系统验证后，plugin_count: $plugin_count"
     
     verify_filesystem "luci-app-passwall2"
-    log_debug "luci-app-passwall2 文件系统验证完成，plugin_count=$plugin_count"
+    log_debug "Passwall2 文件系统验证后，plugin_count: $plugin_count"
     
-    # 验证配置项（关键步骤，添加详细日志）
+    # 验证配置项
     log_step "开始配置项验证"
     if [ -d "package/luci-app-openclash" ]; then
         log_debug "开始验证 OpenClash 配置项，共 ${#OPENCLASH_DEPS[@]} 项"
@@ -376,6 +409,8 @@ main() {
     
     # 最终报告
     log_step "流程执行完成，生成报告"
+    log_debug "最终 plugin_count: $plugin_count（类型: $(declare -p plugin_count 2>/dev/null)）"
+    
     if $validation_passed && [ $plugin_count -gt 0 ]; then
         log_success "🎉 所有验证通过！成功集成 $plugin_count 个插件"
         log_info "建议执行: make menuconfig 确认配置，然后 make -j\$(nproc) V=s 编译"
