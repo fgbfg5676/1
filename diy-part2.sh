@@ -1,8 +1,8 @@
 #!/bin/bash
-# 最终解决方案脚本 - 完整改进版
-# 描述: 整合OpenWrt预编译配置与插件集成功能，移除AdGuardHome和sirpdboy插件
-# --- 启用增强严格模式（覆盖更多错误场景） ---
-set -euo pipefail  # 替换原有的 set -e，增加对未定义变量、管道错误的检测
+# 最终解决方案脚本 - 完整修复版
+# 描述: 整合OpenWrt预编译配置与插件集成功能，修复配置项验证退出问题
+# --- 启用增强严格模式 ---
+set -euo pipefail
 
 # -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
@@ -18,7 +18,6 @@ fatal_error() {
 
 # -------------------- 环境检查 --------------------
 log_info "===== 开始环境检查 ====="
-# 局部启用命令打印（环境检查涉及多个命令，便于排查依赖缺失）
 set -x
 if [ ! -f "scripts/feeds" ] || [ ! -f "Config.in" ]; then
     fatal_error "请在OpenWrt源码根目录执行此脚本"
@@ -35,7 +34,7 @@ done
 if ! timeout 3 curl -Is https://github.com >/dev/null 2>&1; then
     log_warning "网络连接可能存在问题，插件克隆可能失败"
 fi
-set +x  # 关闭命令打印
+set +x
 log_success "环境检查通过"
 
 # =================== 预编译配置阶段 (Pre-Compile) ==================
@@ -52,7 +51,6 @@ log_success "基础变量定义完成。"
 
 # -------------------- 步骤 2：创建必要的目录 --------------------
 log_info "步骤 2：创建必要的目录..."
-# 目录创建可能因权限失败，启用命令打印
 set -x
 mkdir -p "$DTS_DIR" "$CUSTOM_PLUGINS_DIR"
 set +x
@@ -60,7 +58,6 @@ log_success "目录创建完成。"
 
 # -------------------- 步骤 3：写入DTS文件 --------------------
 log_info "步骤 3：正在写入DTS文件..."
-# 文件写入涉及重定向，启用命令打印
 set -x
 cat > "$DTS_FILE" <<'EOF'
 /dts-v1/;
@@ -300,7 +297,6 @@ log_success "DTS文件写入成功。"
 # -------------------- 步骤 4：创建网络配置文件 --------------------
 log_info "步骤 4：创建针对 CM520-79F 的网络配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
-# 网络配置文件创建，启用命令打印
 set -x
 mkdir -p "$BOARD_DIR"
 cat > "$BOARD_DIR/02_network" <<EOF
@@ -322,7 +318,6 @@ log_success "网络配置文件创建完成。"
 
 # -------------------- 步骤 5：配置设备规则 --------------------
 log_info "步骤 5：配置设备规则..."
-# 设备规则修改可能涉及sed，启用命令打印
 set -x
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
@@ -391,19 +386,15 @@ fetch_plugin() {
     [ -n "$CUSTOM_PLUGINS_DIR" ] && cleanup_paths+=("${CUSTOM_PLUGINS_DIR}/${plugin_name}")
     
     # 逐一清理，记录失败但不中断
-    set -x  # 清理步骤易出错，启用命令打印
+    set -x
     for path in "${cleanup_paths[@]}"; do
         if [ -d "$path" ]; then
             log_info "清理路径: $path"
-            # 先尝试修改权限
             chmod -R 755 "$path" 2>/dev/null || true
-            # 尝试删除
             if ! rm -rf "$path" 2>/dev/null; then
                 log_warning "无法删除 $path，尝试强制删除"
-                # 杀死可能占用的进程
                 lsof +D "$path" 2>/dev/null | awk 'NR>1 {print $2}' | xargs -r kill -9 2>/dev/null || true
                 sleep 1
-                # 再次尝试删除
                 if ! rm -rf "$path" 2>/dev/null; then
                     log_error "强制删除 $path 失败，但继续执行"
                 fi
@@ -435,7 +426,7 @@ fetch_plugin() {
         export GIT_TERMINAL_PROMPT=0
         export GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
         
-        set -x  # 克隆命令易失败，启用详细打印
+        set -x
         if timeout 180 git clone --depth 1 --single-branch --progress "$repo" "$temp_dir" 2>&1 | \
            while IFS= read -r line; do
                echo "[GIT] $line"
@@ -551,7 +542,6 @@ fetch_plugin() {
     if [ -d "package/$plugin_name" ] && [ -f "package/$plugin_name/Makefile" ]; then
         log_success "${plugin_name} 集成成功"
         log_info "安装路径: package/$plugin_name"
-        # 显示一些基本信息
         local makefile_info=$(grep -E "PKG_NAME|PKG_VERSION" "package/$plugin_name/Makefile" 2>/dev/null | head -2)
         [ -n "$makefile_info" ] && log_info "包信息: $makefile_info"
     else
@@ -586,6 +576,15 @@ OPENCLASH_DEPS=(
     "CONFIG_PACKAGE_iptables-mod-conntrack-extra=y"
 )
 
+# 检查OpenClash依赖数组是否有无效元素
+log_info "检查OpenClash依赖项有效性..."
+for config in "${OPENCLASH_DEPS[@]}"; do
+    if [ -z "$config" ]; then
+        log_error "OpenClash依赖项中存在空值，请检查配置"
+        exit 1
+    fi
+done
+
 if fetch_plugin "https://github.com/vernesong/OpenClash.git" "luci-app-openclash" "luci-app-openclash" "${OPENCLASH_DEPS[@]}"; then
     log_success "OpenClash 集成成功"
 else
@@ -606,6 +605,15 @@ PASSWALL2_DEPS=(
     "CONFIG_PACKAGE_iptables-mod-conntrack-extra=y"
 )
 
+# 检查Passwall2依赖数组是否有无效元素
+log_info "检查Passwall2依赖项有效性..."
+for config in "${PASSWALL2_DEPS[@]}"; do
+    if [ -z "$config" ]; then
+        log_error "Passwall2依赖项中存在空值，请检查配置"
+        exit 1
+    fi
+done
+
 if fetch_plugin "https://github.com/xiaorouji/openwrt-passwall2.git" "luci-app-passwall2" "." "${PASSWALL2_DEPS[@]}"; then
     log_success "Passwall2 集成成功"
 else
@@ -613,12 +621,12 @@ else
 fi
 
 # 恢复严格模式
-set -euo pipefail  # 恢复增强严格模式
+set -euo pipefail
 
 # -------------------- 更新 feeds --------------------
 log_info "更新 feeds..."
-set +e  # 临时禁用严格模式
-set -x  # feeds操作易出错，启用命令打印
+set +e
+set -x
 if ./scripts/feeds update -a >/dev/null 2>&1; then
     log_success "Feeds 更新成功"
 else
@@ -641,11 +649,10 @@ else
     fi
 fi
 set +x
-set -euo pipefail  # 重新启用增强严格模式
+set -euo pipefail
 
 # -------------------- 生成最终配置文件 --------------------
 log_info "正在启用必要的软件包并生成最终配置..."
-# 创建临时配置文件
 CONFIG_FILE=".config.custom"
 set -x
 rm -f $CONFIG_FILE
@@ -671,7 +678,7 @@ if make defconfig 2>/dev/null; then
 else
     log_warning "make defconfig 执行有警告，但配置已生成"
 fi
-set -euo pipefail  # 恢复增强严格模式
+set -euo pipefail
 set +x
 
 # -------------------- 验证插件 --------------------
@@ -698,6 +705,21 @@ log_info "开始验证已集成的插件..."
 verify_filesystem "luci-app-openclash" && log_info "OpenClash 文件系统验证通过"
 verify_filesystem "luci-app-passwall2" && log_info "Passwall2 文件系统验证通过"
 
+# 验证.config文件有效性
+log_info "验证配置文件有效性..."
+set -x
+if [ ! -f ".config" ]; then
+    log_error ".config 文件不存在"
+    validation_passed=false
+elif [ ! -r ".config" ]; then
+    log_error ".config 文件不可读取"
+    validation_passed=false
+elif [ -z "$(cat .config 2>/dev/null)" ]; then
+    log_error ".config 文件为空"
+    validation_passed=false
+fi
+set +x
+
 verify_configs() {
     local plugin_name=$1
     shift
@@ -705,9 +727,26 @@ verify_configs() {
     local missing=0
     local found=0
     log_info "验证 $plugin_name 配置项..."
-    set -x
+    set -x  # 保持调试模式直到函数结束
+    
+    # 检查依赖数组是否有效
+    if [ ${#deps[@]} -eq 0 ]; then
+        log_warning "$plugin_name 没有配置依赖项"
+        set +x
+        return 0
+    fi
+    
+    # 逐个验证配置项，不因为单个失败而退出
     for config in "${deps[@]}"; do
-        if grep -q "^$config$" .config; then
+        # 确保配置项不为空
+        if [ -z "$config" ]; then
+            log_warning "发现空的配置项，跳过"
+            ((missing++))
+            continue
+        fi
+        
+        # 使用grep验证，重定向错误输出，不触发严格模式
+        if grep -q "^$config$" .config 2>/dev/null; then
             log_info "✅ $config"
             ((found++))
         else
@@ -715,7 +754,10 @@ verify_configs() {
             ((missing++))
         fi
     done
-    set +x
+    
+    set +x  # 关闭调试模式
+    
+    # 输出验证结果统计
     if [ $missing -eq 0 ]; then
         log_success "$plugin_name 所有配置项验证通过 ($found/$((found + missing)))"
     else
@@ -725,8 +767,17 @@ verify_configs() {
 }
 
 # 只验证已成功集成的插件
-[ -d "package/luci-app-openclash" ] && verify_configs "OpenClash" "${OPENCLASH_DEPS[@]}"
-[ -d "package/luci-app-passwall2" ] && verify_configs "Passwall2" "${PASSWALL2_DEPS[@]}"
+if [ -d "package/luci-app-openclash" ]; then
+    verify_configs "OpenClash" "${OPENCLASH_DEPS[@]}"
+else
+    log_info "OpenClash 未集成，跳过配置项验证"
+fi
+
+if [ -d "package/luci-app-passwall2" ]; then
+    verify_configs "Passwall2" "${PASSWALL2_DEPS[@]}"
+else
+    log_info "Passwall2 未集成，跳过配置项验证"
+fi
 
 verify_feeds_visibility() {
     log_info "验证插件在 feeds 中的可见性..."
