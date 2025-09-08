@@ -1,23 +1,27 @@
 #!/bin/bash
-# 完整修复版 - 解决插件集成失败导致脚本终止的问题
-# 核心改进：允许插件集成失败但继续执行，增强错误日志和容错性
+# 增强调试版 - 解决无明显错误但脚本退出的问题
+# 核心改进：添加详细步骤日志、启用命令追踪、强化错误捕获
 
-# 启用基础严格模式，关键步骤手动控制错误处理
+# 启用基础严格模式，保留调试能力
 set -eo pipefail  # 保留 errexit 和 pipefail，移除 nounset 避免未定义变量导致退出
+export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '  # 调试输出格式：文件名:行号
 
-# -------------------- 日志函数 --------------------
+# -------------------- 日志函数（增强步骤标记） --------------------
+log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }  # 步骤标记
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
 log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
+log_debug() { echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }  # 调试日志
 
 # -------------------- 全局变量 --------------------
 validation_passed=true
 plugin_count=0
 CONFIG_FILE=".config"
 CUSTOM_PLUGINS_DIR="package/custom"
+DEBUG_MODE=${DEBUG_MODE:-"true"}  # 默认启用调试模式
 
-# -------------------- 插件集成函数（增强容错） --------------------
+# -------------------- 插件集成函数 --------------------
 fetch_plugin() {
     local repo="$1"
     local plugin_name="$2"
@@ -30,11 +34,11 @@ fetch_plugin() {
     local max_retries=3
     local success=0
     
-    log_info "===== 开始集成插件: $plugin_name ====="
+    log_step "开始集成插件: $plugin_name"
     log_info "仓库地址: $repo"
     log_info "目标路径: package/$plugin_name"
     
-    # 创建锁文件防止并发操作
+    # 锁文件处理
     local lock_file="/tmp/.${plugin_name}_lock"
     exec 200>"$lock_file"
     if ! flock -n 200; then
@@ -42,7 +46,7 @@ fetch_plugin() {
         flock 200
     fi
     
-    # 清理旧版本插件
+    # 清理旧版本
     log_info "清理旧版 $plugin_name 相关文件..."
     local cleanup_paths=(
         "feeds/luci/applications/$plugin_name"
@@ -172,13 +176,15 @@ fetch_plugin() {
     fi
 }
 
-# -------------------- 验证文件系统函数（允许失败但继续） --------------------
+# -------------------- 验证文件系统函数 --------------------
 verify_filesystem() {
     local plugin=$1
-    log_info "===== 验证 $plugin 文件系统 ====="
+    log_step "验证 $plugin 文件系统"
     
     if [ -d "package/$plugin" ]; then
+        log_debug "目录存在: package/$plugin"
         if [ -f "package/$plugin/Makefile" ]; then
+            log_debug "Makefile存在: package/$plugin/Makefile"
             log_success "$plugin 目录和Makefile均存在"
             ((plugin_count++))
             return 0
@@ -191,11 +197,10 @@ verify_filesystem() {
         validation_passed=false
     fi
     
-    # 即使失败也返回0，避免终止脚本
-    return 0
+    return 0  # 即使失败也继续执行
 }
 
-# -------------------- 验证配置项函数（完整遍历所有项） --------------------
+# -------------------- 验证配置项函数（增强调试） --------------------
 verify_configs() {
     local plugin_name="$1"
     shift
@@ -204,7 +209,7 @@ verify_configs() {
     local found=0
     local total=${#deps[@]}
 
-    log_info "===== 验证 $plugin_name 配置项（共 $total 项） ====="
+    log_step "验证 $plugin_name 配置项（共 $total 项）"
     
     # 临时关闭errexit，确保完整遍历
     set +e
@@ -212,18 +217,28 @@ verify_configs() {
         local config="${deps[$index]}"
         local item_num=$((index + 1))
         
+        log_debug "处理第 $item_num 项: $config"
+        
         if [ -z "$config" ]; then
             log_warning "第 $item_num 项：配置项为空，跳过"
             ((missing++))
             continue
         fi
         
+        # 检查.config是否可写
+        if [ ! -w "$CONFIG_FILE" ]; then
+            log_warning "$CONFIG_FILE 不可写，无法添加配置项"
+        fi
+        
+        # 执行grep并显式捕获退出码
         if grep -q "^${config}$" "$CONFIG_FILE" 2>/dev/null; then
             log_info "第 $item_num 项: ✅ $config"
             ((found++))
         else
             log_warning "第 $item_num 项: ❌ $config（.config中未找到）"
             ((missing++))
+            # 尝试添加缺失的配置项（可选）
+            # echo "$config" >> "$CONFIG_FILE" 2>/dev/null && log_info "已自动添加缺失项: $config"
         fi
     done
     set -e  # 恢复errexit
@@ -244,7 +259,7 @@ verify_configs() {
 
 # -------------------- 检查配置文件有效性 --------------------
 check_config_file() {
-    log_info "===== 检查配置文件 ====="
+    log_step "检查配置文件"
     log_info "目标文件: $CONFIG_FILE"
     
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -255,6 +270,10 @@ check_config_file() {
     if [ ! -r "$CONFIG_FILE" ]; then
         log_error "配置文件不可读取（权限问题）"
         return 1
+    fi
+    
+    if [ ! -w "$CONFIG_FILE" ]; then
+        log_warning "配置文件不可写，后续可能无法添加依赖项"
     fi
     
     if [ -z "$(cat "$CONFIG_FILE" 2>/dev/null)" ]; then
@@ -292,20 +311,28 @@ PASSWALL2_DEPS=(
     "CONFIG_PACKAGE_unzip=y"
 )
 
-# -------------------- 主流程 --------------------
+# -------------------- 主流程（添加详细步骤追踪） --------------------
 main() {
-    log_info "===== 开始OpenWrt插件集成与验证流程 ====="
+    log_step "开始OpenWrt插件集成与验证流程"
+    
+    # 启用调试输出（根据环境变量控制）
+    if [ "$DEBUG_MODE" = "true" ]; then
+        log_info "启用调试模式，将输出详细命令执行日志"
+        set -x
+    fi
     
     # 检查基础环境
     check_config_file || log_warning "配置文件检查有问题，继续执行..."
     
     # 创建必要目录
+    log_step "创建必要目录"
     mkdir -p "$CUSTOM_PLUGINS_DIR" "package"
+    log_debug "创建目录: $CUSTOM_PLUGINS_DIR 和 package"
     
-    # 集成插件（允许失败，记录但不终止）
-    log_info "===== 开始集成插件 ====="
+    # 集成插件
+    log_step "开始集成插件"
     
-    log_info "----- 集成 OpenClash -----"
+    log_step "集成 OpenClash"
     if fetch_plugin "https://github.com/vernesong/OpenClash.git" \
         "luci-app-openclash" "luci-app-openclash" "${OPENCLASH_DEPS[@]}"; then
         log_success "OpenClash 集成流程完成"
@@ -313,7 +340,7 @@ main() {
         log_error "OpenClash 集成失败，将跳过其验证步骤"
     fi
     
-    log_info "----- 集成 Passwall2 -----"
+    log_step "集成 Passwall2"
     if fetch_plugin "https://github.com/xiaorouji/openwrt-passwall2.git" \
         "luci-app-passwall2" "." "${PASSWALL2_DEPS[@]}"; then
         log_success "Passwall2 集成流程完成"
@@ -322,26 +349,33 @@ main() {
     fi
     
     # 验证插件文件系统
-    log_info "===== 开始文件系统验证 ====="
+    log_step "开始文件系统验证"
     verify_filesystem "luci-app-openclash"
-    verify_filesystem "luci-app-passwall2"
+    log_debug "luci-app-openclash 文件系统验证完成，plugin_count=$plugin_count"
     
-    # 验证配置项
-    log_info "===== 开始配置项验证 ====="
+    verify_filesystem "luci-app-passwall2"
+    log_debug "luci-app-passwall2 文件系统验证完成，plugin_count=$plugin_count"
+    
+    # 验证配置项（关键步骤，添加详细日志）
+    log_step "开始配置项验证"
     if [ -d "package/luci-app-openclash" ]; then
+        log_debug "开始验证 OpenClash 配置项，共 ${#OPENCLASH_DEPS[@]} 项"
         verify_configs "OpenClash" "${OPENCLASH_DEPS[@]}"
+        log_debug "OpenClash 配置项验证完成"
     else
         log_info "OpenClash 未集成，跳过配置项验证"
     fi
     
     if [ -d "package/luci-app-passwall2" ]; then
+        log_debug "开始验证 Passwall2 配置项，共 ${#PASSWALL2_DEPS[@]} 项"
         verify_configs "Passwall2" "${PASSWALL2_DEPS[@]}"
+        log_debug "Passwall2 配置项验证完成"
     else
         log_info "Passwall2 未集成，跳过配置项验证"
     fi
     
     # 最终报告
-    log_info "===== 流程执行完成 ====="
+    log_step "流程执行完成，生成报告"
     if $validation_passed && [ $plugin_count -gt 0 ]; then
         log_success "🎉 所有验证通过！成功集成 $plugin_count 个插件"
         log_info "建议执行: make menuconfig 确认配置，然后 make -j\$(nproc) V=s 编译"
