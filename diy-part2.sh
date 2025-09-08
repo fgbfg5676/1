@@ -1,65 +1,72 @@
 #!/bin/bash
-#
-# 最終防線版 diy-part2.sh (v47 - 純淨且完整)
-# 描述: 在純淨的基礎上，手動定義所有必需的驅動和軟體包，然後讓 make defconfig 補完。
-#
+# 最终解决方案脚本 - 整合版
+# 描述: 整合OpenWrt预编译配置与插件集成功能，移除AdGuardHome和sirpdboy插件
+# --- 启用严格模式，任何错误立即终止 ---
+set -e
 
-# --- 啟用嚴格模式 ---
-set -euxo pipefail
-
-# --- 日誌函數 ---
+# -------------------- 日志函数 --------------------
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m"; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
+log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 
-log_info "===== 開始執行 v47 版純淨且完整腳本 ====="
-
-# =================================================================
-# 步驟 1 & 2：Feeds 和插件 (保持不變)
-# =================================================================
-log_info "步驟 1 & 2：處理 Feeds 和自訂插件..."
-./scripts/feeds update -a
-./scripts/feeds install -a
-
-CUSTOM_PLUGINS_DIR="package/custom"
-mkdir -p "$CUSTOM_PLUGINS_DIR"
-if [ ! -d "$CUSTOM_PLUGINS_DIR/luci-app-partexp/.git" ]; then
-  git clone --depth 1 https://github.com/sirpdboy/luci-app-partexp.git "$CUSTOM_PLUGINS_DIR/luci-app-partexp"
+# -------------------- 环境检查 --------------------
+log_info "===== 开始环境检查 ====="
+if [ ! -f "scripts/feeds" ] || [ ! -f "Config.in" ]; then
+    log_error "请在OpenWrt源码根目录执行此脚本"
 fi
-log_success "Feeds 和插件處理完成 。"
 
+for cmd in git make timeout curl wget; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+        log_error "缺少必需的命令: $cmd"
+    fi
+done
 
-# =================================================================
-# 步驟 3：寫入硬體定義 (保持不變)
-# =================================================================
-log_info "步驟 3：寫入硬體定義..."
-# --- 寫入 DTS 文件 ---
+[ ! -f ".config" ] && touch .config
+
+if ! timeout 3 curl -Is https://github.com >/dev/null 2>&1; then
+    log_warning "网络连接可能存在问题，插件克隆可能失败"
+fi
+log_success "环境检查通过"
+
+# =================== 预编译配置阶段 (Pre-Compile) ==================
+log_info "===== 开始执行预编译配置 ====="
+
+# -------------------- 步骤 1：基础变量定义 --------------------
+log_info "步骤 1：定义基础变量..."
+ARCH="armv7"
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
-mkdir -p "$DTS_DIR"
-cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
+DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
+GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+CUSTOM_PLUGINS_DIR="package/custom"
+log_success "基础变量定义完成。"
+
+# -------------------- 步骤 2：创建必要的目录 --------------------
+log_info "步骤 2：创建必要的目录..."
+mkdir -p "$DTS_DIR" "$CUSTOM_PLUGINS_DIR"
+log_success "目录创建完成。"
+
+# -------------------- 步骤 3：写入DTS文件 --------------------
+log_info "步骤 3：正在写入DTS文件..."
+cat > "$DTS_FILE" <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
-
 #include "qcom-ipq4019.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/soc/qcom,tcsr.h>
-
 / {
 	model = "MobiPromo CM520-79F";
 	compatible = "mobipromo,cm520-79f";
-
 	aliases {
 		led-boot = &led_sys;
 		led-failsafe = &led_sys;
 		led-running = &led_sys;
 		led-upgrade = &led_sys;
 	};
-
 	chosen {
 		bootargs-append = " ubi.block=0,1 root=/dev/ubiblock0_1";
 	};
-
 	soc {
 		rng@22000 {
 			status = "okay";
@@ -133,7 +140,6 @@ cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
 			status = "okay";
 		};
 	};
-
 	led_spi {
 		compatible = "spi-gpio";
 		#address-cells = <1>;
@@ -150,7 +156,6 @@ cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
 			spi-max-frequency = <1000000>;
 		};
 	};
-
 	leds {
 		compatible = "gpio-leds";
 		usb {
@@ -186,7 +191,6 @@ cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
 			linux,default-trigger = "phy1tpt";
 		};
 	};
-
 	keys {
 		compatible = "gpio-keys";
 		reset {
@@ -196,24 +200,20 @@ cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
 		};
 	};
 };
-
 &blsp_dma { status = "okay"; };
 &blsp1_uart1 { status = "okay"; };
 &blsp1_uart2 { status = "okay"; };
 &cryptobam { status = "okay"; };
-
 &gmac0 {
 	status = "okay";
 	nvmem-cells = <&macaddr_art_1006>;
 	nvmem-cell-names = "mac-address";
 };
-
 &gmac1 {
 	status = "okay";
 	nvmem-cells = <&macaddr_art_5006>;
 	nvmem-cell-names = "mac-address";
 };
-
 &nand {
 	pinctrl-0 = <&nand_pins>;
 	pinctrl-names = "default";
@@ -247,9 +247,7 @@ cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
 		};
 	};
 };
-
 &qpic_bam { status = "okay"; };
-
 &tlmm {
 	mdio_pins: mdio_pinmux {
 		mux_1 {
@@ -276,25 +274,25 @@ cat > "$DTS_DIR/qcom-ipq4019-cm520-79f.dts" <<'EOF'
 		};
 	};
 };
-
 &usb3_ss_phy { status = "okay"; };
 &usb3_hs_phy { status = "okay"; };
 &usb2_hs_phy { status = "okay"; };
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
-log_success "DTS 文件寫入成功。"
+log_success "DTS文件写入成功。"
 
-# --- 創建網絡配置文件 ---
+# -------------------- 步骤 4：创建网络配置文件 --------------------
+log_info "步骤 4：创建针对 CM520-79F 的网络配置文件..."
 BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 mkdir -p "$BOARD_DIR"
-cat > "$BOARD_DIR/02_network" <<'EOF'
+cat > "$BOARD_DIR/02_network" <<EOF
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
 	local machine
-	machine=$(board_name)
-	case "$machine" in
+	machine=\$(board_name)
+	case "\$machine" in
 	"mobipromo,cm520-79f")
 		ucidef_set_interfaces_lan_wan "eth1" "eth0"
 		;;
@@ -302,13 +300,12 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-log_success "網絡配置文件創建完成。"
+log_success "网络配置文件创建完成。"
 
-# --- 配置設備規則 ---
-GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
+# -------------------- 步骤 5：配置设备规则 --------------------
+log_info "步骤 5：配置设备规则..."
 if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
     cat <<EOF >> "$GENERIC_MK"
-
 define Device/mobipromo_cm520-79f
   DEVICE_VENDOR := MobiPromo
   DEVICE_MODEL := CM520-79F
@@ -320,114 +317,220 @@ define Device/mobipromo_cm520-79f
 endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
-    log_success "設備規則添加完成。"
+    log_success "设备规则添加完成。"
 else
     sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK"
-    log_info "設備規則已存在，更新 IMAGE_SIZE。"
+    log_info "设备规则已存在，更新IMAGE_SIZE。"
 fi
-log_success "硬體定義寫入完成。"
 
-# =================================================================
-# 步驟 4：生成最終配置文件 .config (純淨且完整)
-# =================================================================
-log_info "步驟 4：生成最終 .config 文件 (純淨且完整)..."
+# -------------------- 通用函数 --------------------
+add_config() {
+    local option="$1"
+    if ! grep -q "^$option$" .config; then
+        echo "$option" >> .config
+    fi
+}
 
-# --- 關鍵核心：創建一個全新的、純淨的 .config 文件 ---
-rm -f .config .config.old
-touch .config
+fetch_plugin() {
+    local repo="$1"
+    local plugin_name="$2"
+    local subdir="$3"
+    shift 3
+    local deps=("$@")
+    local temp_dir="package/${plugin_name}-temp"
+    local max_retries=3
+    local retry_count=0
+    local success=0
 
-# --- ✅ 關鍵修正：一次性寫入所有必需的配置 ---
-cat > .config <<'EOF'
-#
-# ========================================
-# 基本目標配置 (Target Configuration)
-# ========================================
-#
-CONFIG_TARGET_ipq40xx=y
-CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y
+    log_info "清理旧版 ${plugin_name}..."
+    rm -rf feeds/luci/applications/"$plugin_name" 2>/dev/null
+    rm -rf feeds/packages/net/"$plugin_name" 2>/dev/null
+    rm -rf feeds/routing/"$plugin_name" 2>/dev/null
+    [ -n "$CUSTOM_PLUGINS_DIR" ] && rm -rf "${CUSTOM_PLUGINS_DIR}/${plugin_name}" 2>/dev/null
+    rm -rf "package/${plugin_name}" "$temp_dir" 2>/dev/null
 
-#
-# ========================================
-# 固件與檔案系統 (Firmware & Filesystem)
-# ========================================
-#
-CONFIG_TARGET_ROOTFS_SQUASHFS=y
-CONFIG_TARGET_SQUASHFS_BLOCK_SIZE=1024
-CONFIG_TARGET_UBIFS_FREE_SPACE_FIXUP=y
-# 啟用 TRX 格式固件打包工具
-CONFIG_PACKAGE_trx=y
+    if ! git ls-remote "$repo" >/dev/null 2>&1; then
+        log_error "无法访问仓库: $repo，请检查网络"
+        return 1
+    fi
 
-#
-# ========================================
-# 核心系統與驅動 (Core System & Drivers)
-# ========================================
-#
-# UBI (Unsorted Block Images) 相關驅動，NAND Flash 必需
-CONFIG_PACKAGE_kmod-ubi=y
-CONFIG_PACKAGE_kmod-ubifs=y
+    while [ $retry_count -lt $max_retries ]; do
+        ((retry_count++))
+        log_info "克隆 ${plugin_name} (尝试 $retry_count/$max_retries)..."
+        if timeout 120 git clone --depth 1 --single-branch "$repo" "$temp_dir" >/dev/null 2>&1; then
+            success=1
+            break
+        else
+            [ -d "$temp_dir" ] && rm -rf "$temp_dir"
+            [ $retry_count -lt $max_retries ] && sleep 3
+        fi
+    done
 
-#
-# 無線驅動 (Wireless Drivers)
-#
-CONFIG_PACKAGE_kmod-ath10k-ct=y
-CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y
-# 這個包提供了 ipq40xx 平台的 WiFi 校準數據和板級數據
-CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y
+    if [ $success -eq 0 ]; then
+        log_error "${plugin_name} 克隆失败，已重试 $max_retries 次"
+        return 1
+    fi
 
-#
-# ========================================
-# LuCI 網頁介面 (LuCI Web Interface)
-# ========================================
-#
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-mod-status=y
-CONFIG_PACKAGE_luci-mod-system=y
-CONFIG_PACKAGE_luci-app-firewall=y
-CONFIG_PACKAGE_luci-proto-ipv6=y
-CONFIG_PACKAGE_luci-proto-ppp=y
-CONFIG_PACKAGE_luci-theme-bootstrap=y
+    local source_path="$temp_dir"
+    [ -n "$subdir" ] && [ "$subdir" != "." ] && source_path="$temp_dir/$subdir"
 
-#
-# ========================================
-# 您需要的客製化軟體包 (Custom Packages)
-# ========================================
-#
-CONFIG_PACKAGE_luci-app-partexp=y
+    if [ ! -d "$source_path" ]; then
+        log_error "${plugin_name} 源目录不存在: $source_path"
+        rm -rf "$temp_dir"
+        return 1
+    fi
 
-#
-# ========================================
-# 網路工具 (Networking Utilities)
-# ========================================
-#
-# 選擇包含 DHCPv6 功能的 dnsmasq-full
-CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y
-# 禁用預設的 dnsmasq，避免衝突
-# CONFIG_PACKAGE_dnsmasq is not set
+    if [ ! -f "$source_path/Makefile" ]; then
+        local found_makefile=$(find "$source_path" -maxdepth 2 -name Makefile -print -quit)
+        if [ -n "$found_makefile" ]; then
+            source_path=$(dirname "$found_makefile")
+            log_warning "使用子目录 Makefile: $source_path/Makefile"
+        else
+            log_error "${plugin_name} 缺少 Makefile"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
 
-#
-# ========================================
-# 其他重要選項 (Other Important Options)
-# ========================================
-#
-# 允許 rootfs 分區大小超過內核檢查限制，對於大容量 Flash 很重要
-CONFIG_TARGET_ROOTFS_PARTSIZE_FIXED=y
-EOF
+    if ! mv "$source_path" "package/$plugin_name" 2>/dev/null; then
+        log_error "${plugin_name} 移动失败"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    rm -rf "$temp_dir"
 
-log_success "最小化 .config 文件手動創建完成。"
+    for dep in "${deps[@]}"; do
+        [ -n "$dep" ] && add_config "$dep"
+    done
+    log_info "${plugin_name} 依赖项配置完成"
+    log_success "${plugin_name} 集成成功"
+    return 0
+}
 
-# --- 執行 make defconfig 來補完所有深層次依賴 ---
-log_info "正在執行 'make defconfig' 來生成完整配置..."
+# -------------------- 插件集成 --------------------
+log_info "开始插件集成过程..."
+
+OPENCLASH_DEPS=(
+    "CONFIG_PACKAGE_luci-app-openclash=y"
+    "CONFIG_PACKAGE_iptables-mod-tproxy=y"
+    "CONFIG_PACKAGE_kmod-tun=y"
+    "CONFIG_PACKAGE_dnsmasq-full=y"
+    "CONFIG_PACKAGE_coreutils-nohup=y"
+    "CONFIG_PACKAGE_bash=y"
+    "CONFIG_PACKAGE_curl=y"
+    "CONFIG_PACKAGE_jsonfilter=y"
+    "CONFIG_PACKAGE_ca-certificates=y"
+    "CONFIG_PACKAGE_iptables-mod-socket=y"
+    "CONFIG_PACKAGE_iptables-mod-conntrack-extra=y"
+)
+fetch_plugin "https://github.com/vernesong/OpenClash.git" "luci-app-openclash" "luci-app-openclash" "${OPENCLASH_DEPS[@]}"
+
+PASSWALL2_DEPS=(
+    "CONFIG_PACKAGE_luci-app-passwall2=y"
+    "CONFIG_PACKAGE_xray-core=y"
+    "CONFIG_PACKAGE_sing-box=y"
+    "CONFIG_PACKAGE_chinadns-ng=y"
+    "CONFIG_PACKAGE_haproxy=y"
+    "CONFIG_PACKAGE_hysteria=y"
+    "CONFIG_PACKAGE_v2ray-geoip=y"
+    "CONFIG_PACKAGE_v2ray-geosite=y"
+    "CONFIG_PACKAGE_unzip=y"
+    "CONFIG_PACKAGE_iptables-mod-socket=y"
+    "CONFIG_PACKAGE_iptables-mod-conntrack-extra=y"
+)
+fetch_plugin "https://github.com/xiaorouji/openwrt-passwall2.git" "luci-app-passwall2" "." "${PASSWALL2_DEPS[@]}"
+
+# -------------------- 更新 feeds --------------------
+log_info "更新 feeds..."
+./scripts/feeds update -a >/dev/null 2>&1 || { log_warning "Feeds 更新失败，尝试部分更新..."; ./scripts/feeds update luci packages routing >/dev/null 2>&1 || log_error "部分 feeds 更新失败"; }
+./scripts/feeds install -a >/dev/null 2>&1 || { log_warning "Feeds 安装失败，尝试重试..."; ./scripts/feeds install -a >/dev/null 2>&1 || log_error "Feeds 重试失败"; }
+log_success "Feeds 更新与安装完成"
+
+# -------------------- 生成最终配置文件 --------------------
+log_info "正在启用必要的软件包并生成最终配置..."
+# 创建临时配置文件
+CONFIG_FILE=".config.custom"
+rm -f $CONFIG_FILE
+
+# 添加基础依赖
+echo "CONFIG_PACKAGE_kmod-ubi=y" >> $CONFIG_FILE
+echo "CONFIG_PACKAGE_kmod-ubifs=y" >> $CONFIG_FILE
+echo "CONFIG_PACKAGE_trx=y" >> $CONFIG_FILE
+echo "CONFIG_PACKAGE_kmod-ath10k-ct=y" >> $CONFIG_FILE
+echo "CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y" >> $CONFIG_FILE
+echo "CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y" >> $CONFIG_FILE
+echo "CONFIG_PACKAGE_dnsmasq_full_dhcpv6=y" >> $CONFIG_FILE
+echo "CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y" >> $CONFIG_FILE
+
+# 合并配置到主配置文件
+cat $CONFIG_FILE >> .config
+rm -f $CONFIG_FILE
+
+# 生成最终配置
 make defconfig
-log_success "最終 .config 文件生成完成。"
+log_success "最终配置文件生成完成。"
 
-# =================================================================
-# 步驟 5：最終驗證
-# =================================================================
-log_info "步驟 5：最終驗證 .config 文件..."
-if ! grep -q "CONFIG_TARGET_ipq40xx_DEVICE_mobipromo_cm520-79f=y" .config; then
-    log_error "最終驗證失敗：目標設備 mobipromo_cm520-79f 未被啟用！"
+# -------------------- 验证插件 --------------------
+validation_passed=true
+
+verify_filesystem() {
+    local plugin=$1
+    if [ -d "package/$plugin" ] && [ -f "package/$plugin/Makefile" ]; then
+        log_success "$plugin 目录和 Makefile 验证通过"
+    else
+        log_error "$plugin 目录或 Makefile 缺失"
+        validation_passed=false
+    fi
+}
+
+verify_filesystem "luci-app-openclash"
+verify_filesystem "luci-app-passwall2"
+
+verify_configs() {
+    local plugin_name=$1
+    shift
+    local deps=("$@")
+    local missing=0
+    log_info "验证 $plugin_name 配置项..."
+    for config in "${deps[@]}"; do
+        if grep -q "^$config$" .config; then
+            log_info "✅ $config"
+        else
+            log_error "❌ $config (未找到)"
+            missing=$((missing+1))
+            validation_passed=false
+        fi
+    done
+    if [ $missing -eq 0 ]; then
+        log_success "$plugin_name 所有配置项验证通过"
+    else
+        log_error "$plugin_name 缺少 $missing 个配置项"
+    fi
+}
+
+verify_configs "OpenClash" "${OPENCLASH_DEPS[@]}"
+verify_configs "Passwall2" "${PASSWALL2_DEPS[@]}"
+
+verify_feeds_visibility() {
+    log_info "验证插件在 feeds 中的可见性..."
+    ./scripts/feeds list | grep -q "luci-app-openclash" && log_success "OpenClash 在 feeds 中可见" || log_warning "OpenClash 在 feeds 中不可见"
+    ./scripts/feeds list | grep -q "luci-app-passwall2" && log_success "Passwall2 在 feeds 中可见" || log_warning "Passwall2 在 feeds 中不可见"
+}
+verify_feeds_visibility
+
+# -------------------- 最终报告 --------------------
+if $validation_passed; then
+    log_success "所有插件集成验证通过"
+else
+    log_error "插件集成验证失败，请检查错误日志"
+    log_info "调试建议:"
+    log_info "1. 检查网络连接和Git访问权限"
+    log_info "2. 查看 .config 文件确认配置项"
+    log_info "3. 手动检查 package/ 目录下的插件目录"
+    log_info "4. 运行 'make menuconfig' 确认插件是否可用"
+    exit 1
 fi
-log_success "配置驗證通過！"
 
-log_info "===== 所有配置步驟已成功完成！準備開始編譯。 ====="
+log_success "所有预编译步骤和插件集成均已成功完成！"
+log_info "接下来请执行 'make' 命令进行编译。"
+exit 0
