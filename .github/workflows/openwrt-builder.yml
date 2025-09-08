@@ -1,9 +1,7 @@
-#
 # https://github.com/P3TERX/Actions-OpenWrt
 #
 # File: .github/workflows/openwrt-builder.yml
 # Description: Build OpenWrt using GitHub Actions
-#
 
 name: OpenWrt Builder
 
@@ -27,6 +25,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      actions: write  # 授予删除工作流的权限
+      contents: write  # 授予发布相关操作的权限
 
     steps:
     - name: Checkout
@@ -142,6 +143,7 @@ jobs:
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@main
       with:
+        token: ${{ secrets.PAT_TOKEN }}  # 使用指定的PAT_TOKEN
         retain_days: 0
         keep_minimum_runs: 2
 
