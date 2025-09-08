@@ -49,10 +49,10 @@ jobs:
       if: steps.cacheHash.outputs.cache-hit != 'true'
       uses: peter-evans/repository-dispatch@v2
       with:
-        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}   # 必须有
+        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         event-type: Source_Code_Update
         repository: fgbfg5676/1
-        client-payload: '{}'   # 注意是字符串
+        client-payload: '{}'
 
     - name: Delete workflow runs
       uses: Mattraks/delete-workflow-runs@v2
