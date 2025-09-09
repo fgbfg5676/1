@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.8-内核更新版)
-# 优化：动态获取最新 OpenClash 内核，更新 Passwall2 依赖
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.9-内核下载修复版)
+# 优化：动态获取最新 OpenClash 内核，修复下载逻辑，更新 Passwall2 依赖
 #
 
 set -eo pipefail
@@ -16,7 +16,7 @@ log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; 
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-log_step "开始 OpenWrt 插件集成流程（V6.8-内核更新版）"
+log_step "开始 OpenWrt 插件集成流程（V6.9-内核下载修复版）"
 
 validation_passed=true
 plugin_count=0
@@ -36,7 +36,7 @@ IS_DSA=false
 
 declare -A config_cache=()
 
-# V6.8 更新：为 Passwall2 添加 tuic-client 依赖
+# V6.9 更新：为 Passwall2 添加 tuic-client 依赖
 declare -A DEPS=(
     ["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
     ["drivers"]="CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y CONFIG_PACKAGE_kmod-ipt-core=y CONFIG_PACKAGE_kmod-ipt-nat=y CONFIG_PACKAGE_kmod-ipt-conntrack=y CONFIG_PACKAGE_kmod-ath10k=y CONFIG_PACKAGE_ath10k-firmware-qca4019=y CONFIG_PACKAGE_kmod-mii=y"
@@ -97,8 +97,7 @@ check_environment() {
 # -------------------- 依赖工具检查 --------------------
 check_dependencies() {
     log_step "检查依赖工具"
-    # V6.8 新增 jq 依赖
-    local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" "mkdir" "touch" "wc" "awk" "unzip" "wget" "curl" "gettext" "make" "gcc" "jq")
+    local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" "mkdir" "touch" "wc" "awk" "unzip" "wget" "curl" "gettext" "make" "gcc" "jq" "gunzip" "gzip")
     local missing=()
     
     for tool in "${tools[@]}"; do
@@ -536,48 +535,66 @@ try_git_mirrors() {
     return 1
 }
 
-# v6.8 MODIFIED: Rewritten to dynamically fetch the latest kernel using GitHub API
 download_clash_core() {
     log_step "动态下载最新 OpenClash 内核 (clash_meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
     safe_mkdir "$core_dir"
     
-    local api_url="https://api.github.com/repos/MetaCubeX/Clash.Meta/releases/latest"
-    local core_asset_name="clash-meta-linux-$ARCH.gz"
     local temp_gz_file="/tmp/clash_meta_$$ .gz"
     local temp_core_file="/tmp/clash_meta_$$ "
-
+    
+    local api_url="https://api.github.com/repos/MetaCubeX/Clash.Meta/releases/latest"
+    local core_asset_name="clash-meta-linux-$ARCH.gz"
+    local download_url=""
+    
     log_info "正在从 GitHub API 获取最新内核版本信息..."
     
-    # 使用 curl 和 jq 从 API 获取下载链接
-    local download_url=$(curl -s --connect-timeout 15 "$api_url" | jq -r ".assets[] | select(.name == \"$core_asset_name\") | .browser_download_url")
-
-    if [ -z "$download_url" ]; then
-        log_warning "通过 API 获取下载链接失败，尝试使用固定链接..."
-        # Fallback to the old method if API fails
-        download_url="https://github.com/MetaCubeX/Clash.Meta/releases/latest/download/$core_asset_name"
+    local response=$(curl -s --connect-timeout 15 "$api_url")
+    if echo "$response" | jq -e '.assets' >/dev/null; then
+        download_url=$(echo "$response" | jq -r ".assets[] | select(.name == \"$core_asset_name\") | .browser_download_url")
+        if [ -n "$download_url" ]; then
+            log_info "成功获取最新版本下载链接: $download_url"
+        else
+            log_warning "API 响应中未找到匹配的资产文件，尝试回退链接..."
+        fi
     else
-        local version=$(echo "$download_url" | grep -oP '(?<=/v)[\d.]+(?=/)')
-        log_info "成功获取最新版本: $version"
+        log_warning "GitHub API 请求失败或返回无效数据，尝试回退链接..."
     fi
 
-    log_info "开始下载内核: $download_url"
-    if ! wget --no-check-certificate -O "$temp_gz_file" "$download_url" 2>/dev/null; then
-        log_warning "主地址下载失败，尝试 ghproxy 镜像"
-        if ! wget --no-check-certificate -O "$temp_gz_file" "https://ghproxy.com/$download_url" 2>/dev/null; then
-            log_warning "Clash 内核下载失败（可选）"
-            rm -f "$temp_gz_file"
-            return 1
+    if [ -z "$download_url" ]; then
+        # V6.9 更新：使用已知的稳定版本链接作为回退
+        download_url="https://github.com/MetaCubeX/Clash.Meta/releases/download/v1.18.0/clash-meta-linux-armv7-v1.18.0.gz"
+        log_info "使用回退链接: $download_url"
+    fi
+
+    local url_to_download="$download_url"
+    local mirror_url="https://ghproxy.com/$download_url"
+    local download_succeeded=false
+
+    log_info "开始下载内核..."
+    if wget --no-check-certificate -O "$temp_gz_file" "$url_to_download" >/dev/null 2>&1; then
+        download_succeeded=true
+    else
+        log_warning "主地址下载失败，尝试 ghproxy 镜像..."
+        if wget --no-check-certificate -O "$temp_gz_file" "$mirror_url" >/dev/null 2>&1; then
+            download_succeeded=true
         fi
     fi
 
-    log_info "解压内核文件..."
-    if gzip -d -c "$temp_gz_file" > "$temp_core_file"; then
+    if [ "$download_succeeded" = false ]; then
+        log_error "所有下载尝试失败，跳过内核安装。"
+        rm -f "$temp_gz_file"
+        return 1
+    fi
+
+    log_info "验证并解压内核文件..."
+    if gunzip -t "$temp_gz_file" >/dev/null 2>&1; then
+        gunzip -d -c "$temp_gz_file" > "$temp_core_file"
         mv "$temp_core_file" "$core_dir/clash_meta"
         chmod +x "$core_dir/clash_meta"
         log_success "最新 Clash 内核安装完成: $core_dir/clash_meta"
     else
-        log_error "内核解压失败！"
+        log_error "下载的文件无效（不是 gzip 格式），请检查网络或链接。"
         rm -f "$temp_gz_file" "$temp_core_file"
         return 1
     fi
@@ -720,8 +737,7 @@ verify_config_conflicts() {
         "CONFIG_PACKAGE_kmod-nf-nathelper-extra=y"
         "CONFIG_PACKAGE_kmod-qca-nss-drv=y"
         "CONFIG_PACKAGE_kmod-qca-nss-ecm=y"
-        "CONFIG_PACKAGE_kmod-ipq40xx-qca-eth=y"
-        "CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y"
+        "CONFIG_PACKAGE_ipq-wifi-mobipromo-cm520-79f=y"
     )
     
     for pkg in "${deprecated_packages[@]}"; do
@@ -748,7 +764,6 @@ main() {
     init_config_cache
     setup_device_tree
     
-    # V6.8 ADDED: Force pull feeds repos to get the latest package definitions
     log_step "强制更新 feeds 仓库"
     for feed in feeds/*; do
       if [ -d "$feed/.git" ]; then
@@ -830,7 +845,6 @@ main() {
         log_info "1. [可选] make menuconfig - 进一步自定义配置"
         log_info "2. make -j$(nproc) V=s - 开始编译"
         log_info "3. 固件输出目录: bin/targets/ipq40xx/generic/"
-        log_info "4. 编译完成后上传固件启用"
     else
         log_warning "⚠️ 没有插件成功集成，请检查网络连接和仓库地址"
         exit 1
