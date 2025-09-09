@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.2-最终修复版)
-# 修复：加固 add_deps_by_layer 函数，确保其健壮性，防止“bad array subscript”错误
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.3-最终修复版)
+# 修复：加固 add_deps_by_layer 函数，并更新 download_clash_core 函数以支持 mihomo 内核下载。
 #
 
 set -eo pipefail
@@ -16,7 +16,7 @@ log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; 
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-log_step "开始 OpenWrt 插件集成流程（V7.2-最终修复版）"
+log_step "开始 OpenWrt 插件集成流程（V7.3-最终修复版）"
 
 validation_passed=true
 plugin_count=0
@@ -258,12 +258,10 @@ add_config_if_missing() {
 }
 add_deps_by_layer() {
     local layer="$1"
-    # 增加对空键的检查，确保传入的层名是有效的
     if [ -z "$layer" ] || [ -z "${DEPS[$layer]}" ]; then
         log_warning "依赖层 '$layer' 不存在或为空，跳过依赖添加。"
         return 1
     fi
-
     local deps_str="${DEPS[$layer]}"
     local -a deps=(); read -ra deps <<< "$deps_str"
     [ ${#deps[@]} -eq 0 ] && return 0
@@ -303,34 +301,37 @@ try_git_mirrors() {
 }
 
 download_clash_core() {
-    log_step "动态下载最新 OpenClash 内核 (clash_meta)"
+    log_step "动态下载最新 OpenClash 内核 (mihomo)"
     local core_dir="package/base-files/files/etc/openclash/core"
     safe_mkdir "$core_dir"
-    local temp_gz_file="/tmp/clash_meta_$$ .gz"
-    local temp_core_file="/tmp/clash_meta_$$ "
-    local api_url="https://api.github.com/repos/MetaCubeX/Clash.Meta/releases/latest"
-    local core_asset_name="clash-meta-linux-$ARCH.gz"
-    local download_url=""
+    local temp_gz_file="/tmp/mihomo_$$ .gz"
+    local temp_core_file="/tmp/mihomo_$$ "
+    local api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+    local fallback_tag="v1.19.2"
+    
     log_info "正在从 GitHub API 获取最新内核版本信息..."
-    local response=$(curl -s --connect-timeout 15 "$api_url")
-    if echo "$response" | jq -e '.assets' >/dev/null; then
-        download_url=$(echo "$response" | jq -r ".assets[] | select(.name == \"$core_asset_name\") | .browser_download_url")
-        if [ -n "$download_url" ]; then log_info "成功获取最新版本下载链接: $download_url"; else log_warning "API 响应中未找到匹配的资产文件，尝试回退链接..."; fi
-    else log_warning "GitHub API 请求失败或返回无效数据，尝试回退链接..."; fi
-    if [ -z "$download_url" ]; then
-        local latest_tag=$(curl -s "https://api.github.com/repos/MetaCubeX/Clash.Meta/releases/latest" | jq -r .tag_name 2>/dev/null || echo "v1.18.0")
-        download_url="https://github.com/MetaCubeX/Clash.Meta/releases/download/$latest_tag/clash-meta-linux-$ARCH.gz"
-        log_info "使用回退链接: $download_url"
+    local latest_tag=$(curl -s --connect-timeout 15 "$api_url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    if [ -z "$latest_tag" ]; then
+        log_warning "GitHub API 请求失败或返回无效数据，将使用回退版本号：$fallback_tag。"
+        latest_tag="$fallback_tag"
+    else
+        log_info "成功获取最新版本标签: $latest_tag"
     fi
-    local url_to_download="$download_url"
+
+    local core_asset_name="mihomo-linux-$ARCH-${latest_tag#v}.gz"
+    local download_url="https://github.com/MetaCubeX/mihomo/releases/download/$latest_tag/$core_asset_name"
+
     local mirrors=(
-        "$url_to_download"
-        "https://ghproxy.com/$url_to_download"
-        "https://hub.fastgit.xyz/${url_to_download#*github.com/}"
+        "$download_url"
+        "https://ghproxy.com/$download_url"
+        "https://hub.fastgit.xyz/${download_url#*github.com/}"
     )
     local download_succeeded=false
+
     log_info "开始下载内核..."
     for mirror in "${mirrors[@]}"; do
+        log_info "尝试下载镜像: $mirror"
         if wget --no-check-certificate -O "$temp_gz_file" "$mirror" >/dev/null 2>&1; then
             if [ -s "$temp_gz_file" ]; then
                 if gunzip -t "$temp_gz_file" >/dev/null 2>&1; then
@@ -343,15 +344,17 @@ download_clash_core() {
             fi
         fi
     done
+
     if [ "$download_succeeded" = false ]; then
         log_error "所有下载尝试失败，跳过内核安装。"
         rm -f "$temp_gz_file"
         return 1
     fi
+    
     gunzip -d -c "$temp_gz_file" > "$temp_core_file"
     mv "$temp_core_file" "$core_dir/clash_meta"
     chmod +x "$core_dir/clash_meta"
-    log_success "最新 Clash 内核安装完成: $core_dir/clash_meta"
+    log_success "最新 Mihomo 内核安装完成: $core_dir/clash_meta"
     rm -f "$temp_gz_file"
     return 0
 }
@@ -393,7 +396,6 @@ fetch_plugin() {
     if ! mv "$source_path" "$CUSTOM_PLUGINS_DIR/$plugin_name"; then log_error "移动插件失败: $plugin_name"; rm -rf "$temp_dir"; flock -u 200; return 1; fi
     rm -rf "$temp_dir"; flock -u 200;
     
-    # 修复后的依赖添加逻辑，将检查推迟到 add_deps_by_layer 内部处理
     add_deps_by_layer "$deps_layer"
     
     log_success "$plugin_name 集成完成"; plugin_count=$((plugin_count + 1)); return 0;
