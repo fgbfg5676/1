@@ -30,7 +30,7 @@ IS_DSA=false  # DSA架构标记
 
 # 云编译参数
 declare -A config_cache=()
-declare -A DEPS=()  # 分层依赖管理
+declare -A DEPS=()  # 分层依赖管理（值为空格分隔的字符串）
 GIT_CONNECT_TIMEOUT=30
 GIT_CLONE_TIMEOUT=1800  # 延长克隆超时
 MAX_RETRIES=3  # 增加重试次数
@@ -46,96 +46,24 @@ GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 NETWORK_CFG_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 NETWORK_CFG="$NETWORK_CFG_DIR/02_network"
 
-# -------------------- 分层依赖定义（增强版） --------------------
-# 1. 内核基础依赖
-DEPS["kernel"]=(
-    "CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y"
-    "CONFIG_KERNEL_NETFILTER=y"
-    "CONFIG_KERNEL_NF_CONNTRACK=y"
-    "CONFIG_KERNEL_NF_NAT=y"
-    "CONFIG_KERNEL_NF_TPROXY=y"
-    "CONFIG_KERNEL_IP6_NF_IPTABLES=y"
-)
+# -------------------- 分层依赖定义（字符串形式） --------------------
+# 1. 内核基础依赖（空格分隔的配置项）
+DEPS["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
 
 # 2. 硬件驱动依赖
-DEPS["drivers"]=(
-    "CONFIG_PACKAGE_kmod-qca-nss-dp=y"
-    "CONFIG_PACKAGE_kmod-qca-ssdk=y"
-    "CONFIG_PACKAGE_kmod-mii=y"
-    "CONFIG_PACKAGE_kmod-phy-qcom-ipq4019=y"
-    "CONFIG_PACKAGE_kmod-of-mdio=y"
-    "CONFIG_PACKAGE_kmod-mdio-gpio=y"
-    "CONFIG_PACKAGE_kmod-fixed-phy=y"
-    "CONFIG_PACKAGE_kmod-ath10k-ct=y"
-    "CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y"
-    "CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y"
-    "CONFIG_PACKAGE_kmod-ubi=y"
-    "CONFIG_PACKAGE_kmod-ubifs=y"
-)
+DEPS["drivers"]="CONFIG_PACKAGE_kmod-qca-nss-dp=y CONFIG_PACKAGE_kmod-qca-ssdk=y CONFIG_PACKAGE_kmod-mii=y CONFIG_PACKAGE_kmod-phy-qcom-ipq4019=y CONFIG_PACKAGE_kmod-of-mdio=y CONFIG_PACKAGE_kmod-mdio-gpio=y CONFIG_PACKAGE_kmod-fixed-phy=y CONFIG_PACKAGE_kmod-ath10k-ct=y CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y"
 
 # 3. 网络核心依赖
-DEPS["network"]=(
-    "CONFIG_PACKAGE_bash=y"
-    "CONFIG_PACKAGE_wget=y"
-    "CONFIG_PACKAGE_tcpdump=y"
-    "CONFIG_PACKAGE_traceroute=y"
-    "CONFIG_PACKAGE_ss=y"
-    "CONFIG_PACKAGE_ping=y"
-    "CONFIG_PACKAGE_dnsmasq-full=y"
-    "CONFIG_PACKAGE_firewall=y"
-    "CONFIG_PACKAGE_udhcpc=y"
-    "CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
-)
+DEPS["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
 
 # 4. OpenClash 依赖（含中文支持）
-DEPS["openclash"]=(
-    "CONFIG_PACKAGE_luci-app-openclash=y"
-    "CONFIG_PACKAGE_luci-app-openclash_DNS_HIJACK=y"
-    "CONFIG_PACKAGE_kmod-tun=y"
-    "CONFIG_PACKAGE_coreutils-nohup=y"
-    "CONFIG_PACKAGE_curl=y"
-    "CONFIG_PACKAGE_jsonfilter=y"
-    "CONFIG_PACKAGE_ca-certificates=y"
-    "CONFIG_PACKAGE_ipset=y"
-    "CONFIG_PACKAGE_ip-full=y"
-    "CONFIG_PACKAGE_ruby=y"
-    "CONFIG_PACKAGE_ruby-yaml=y"
-    "CONFIG_PACKAGE_unzip=y"
-    "CONFIG_PACKAGE_luci-compat=y"
-    "CONFIG_PACKAGE_luci-base=y"
-    "CONFIG_PACKAGE_kmod-inet-diag=y"
-    "CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y"  # 中文支持
-)
+DEPS["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_luci-app-openclash_DNS_HIJACK=y CONFIG_PACKAGE_kmod-tun=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_jsonfilter=y CONFIG_PACKAGE_ca-certificates=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_ruby=y CONFIG_PACKAGE_ruby-yaml=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-base=y CONFIG_PACKAGE_kmod-inet-diag=y CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y"
 
 # 5. Passwall2 依赖（含中文支持）
-DEPS["passwall2"]=(
-    "CONFIG_PACKAGE_luci-app-passwall2=y"
-    "CONFIG_PACKAGE_xray-core=y"
-    "CONFIG_PACKAGE_sing-box=y"
-    "CONFIG_PACKAGE_chinadns-ng=y"
-    "CONFIG_PACKAGE_haproxy=y"
-    "CONFIG_PACKAGE_hysteria=y"
-    "CONFIG_PACKAGE_v2ray-geoip=y"
-    "CONFIG_PACKAGE_v2ray-geosite=y"
-    "CONFIG_PACKAGE_unzip=y"
-    "CONFIG_PACKAGE_coreutils=y"
-    "CONFIG_PACKAGE_coreutils-base64=y"
-    "CONFIG_PACKAGE_coreutils-nohup=y"
-    "CONFIG_PACKAGE_curl=y"
-    "CONFIG_PACKAGE_ipset=y"
-    "CONFIG_PACKAGE_ip-full=y"
-    "CONFIG_PACKAGE_luci-compat=y"
-    "CONFIG_PACKAGE_luci-lib-jsonc=y"
-    "CONFIG_PACKAGE_tcping=y"
-    "CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y"  # 中文支持
-)
+DEPS["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y"
 
 # 6. 目标设备配置
-DEPS["target"]=(
-    "CONFIG_TARGET_ipq40xx=y"
-    "CONFIG_TARGET_ipq40xx_generic=y"
-    "CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y"
-)
+DEPS["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y"
 
 # -------------------- 版本检测与DSA判断 --------------------
 detect_openwrt_version() {
@@ -159,17 +87,12 @@ detect_openwrt_version() {
         # 版本适配：24.10+ 启用nft，旧版本保留iptables
         if [[ "$OPENWRT_VERSION" =~ ^24\.10 || "$OPENWRT_VERSION" == "snapshot" ]]; then
             log_info "版本 24.10+ 启用 nft-tproxy 支持"
-            DEPS["network"]+=("CONFIG_PACKAGE_kmod-nft-nat=y")
-            DEPS["network"]+=("CONFIG_PACKAGE_kmod-nft-tproxy=y")
-            DEPS["openclash"]+=("CONFIG_PACKAGE_kmod-nft-tproxy=y")  # 明确添加OpenClash依赖
+            DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
+            DEPS["openclash"]+=" CONFIG_PACKAGE_kmod-nft-tproxy=y"  # 明确添加OpenClash依赖
         else
             log_info "旧版本启用 iptables 兼容模式"
-            DEPS["network"]+=("CONFIG_PACKAGE_iptables-mod-nat-extra=y")
-            DEPS["network"]+=("CONFIG_PACKAGE_kmod-ipt-offload=y")
-            DEPS["passwall2"]+=("CONFIG_PACKAGE_iptables=y")
-            DEPS["passwall2"]+=("CONFIG_PACKAGE_iptables-mod-tproxy=y")
-            DEPS["passwall2"]+=("CONFIG_PACKAGE_iptables-mod-socket=y")
-            DEPS["passwall2"]+=("CONFIG_PACKAGE_kmod-ipt-nat=y")
+            DEPS["network"]+=" CONFIG_PACKAGE_iptables-mod-nat-extra=y CONFIG_PACKAGE_kmod-ipt-offload=y"
+            DEPS["passwall2"]+=" CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
         fi
     else
         log_warning "未找到版本文件，默认使用DSA架构兼容模式"
@@ -551,10 +474,14 @@ add_config_if_missing() {
     [ -n "$description" ] && log_debug "说明: $description"
 }
 
-# 批量添加分层依赖
+# 批量添加分层依赖（将字符串拆分为数组）
 add_deps_by_layer() {
     local layer="$1"
-    local deps=("${DEPS[$layer]}")
+    local deps_str="${DEPS[$layer]}"
+    local -a deps=()  # 临时数组存储拆分后的依赖项
+
+    # 将空格分隔的字符串拆分为数组
+    read -ra deps <<< "$deps_str"
     
     [ ${#deps[@]} -eq 0 ] && return 0
     
@@ -723,7 +650,7 @@ fetch_plugin() {
     flock -u 200
 
     # 添加插件依赖
-    if [ -n "$deps_layer" ] && [ ${#DEPS[$deps_layer]} -gt 0 ]; then
+    if [ -n "$deps_layer" ] && [ -n "${DEPS[$deps_layer]}" ]; then
         log_info "添加插件依赖层: $deps_layer"
         add_deps_by_layer "$deps_layer"
     fi
