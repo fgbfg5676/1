@@ -788,8 +788,6 @@ main() {
     comment_config_if_exists "luci-app-kms"
 
     # 这里继续 DTS 配置和插件集成...
-}
-
 	
     # DTS设备树配置
     log_step "配置DTS设备树支持"
