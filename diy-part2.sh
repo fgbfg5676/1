@@ -1,13 +1,12 @@
 #!/bin/bash
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6)
-# 核心特性：DSA网络架构适配、依赖冲突自动修复、版本智能识别
-# 支持插件：OpenClash 0.47+（自动下载内核）、Passwall2（含依赖组件）
-# 兼容版本：OpenWrt 22.03+（DSA）、24.10+（nft优先）
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.1)
+# 修复：版本检测失败导致的脚本退出问题
 
 set -eo pipefail
 export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
 
 # -------------------- 日志函数 --------------------
+# （保持不变）
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; exit 1; }
@@ -16,6 +15,7 @@ log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
+# （保持不变）
 validation_passed=true
 plugin_count=0
 CONFIG_FILE=".config"
@@ -23,85 +23,88 @@ CUSTOM_PLUGINS_DIR="package/custom"
 DEBUG_MODE=${DEBUG_MODE:-"false"}
 CLOUD_MODE=${CLOUD_MODE:-"true"}
 
-# 网络接口配置（DSA模式自动适配）
 LAN_IFACE=${LAN_IFACE:-""}
 WAN_IFACE=${WAN_IFACE:-""}
 IS_DSA=false  # DSA架构标记
 
-# 云编译参数
 declare -A config_cache=()
 declare -A DEPS=()  # 分层依赖管理（值为空格分隔的字符串）
 GIT_CONNECT_TIMEOUT=30
-GIT_CLONE_TIMEOUT=1800  # 延长克隆超时
-MAX_RETRIES=3  # 增加重试次数
+GIT_CLONE_TIMEOUT=1800
+MAX_RETRIES=3
 OPENWRT_VERSION="unknown"
 
-# 临时文件清理
 trap 'rm -rf /tmp/*_$$ 2>/dev/null || true' EXIT
 
 # -------------------- 设备配置路径 --------------------
+# （保持不变）
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
 NETWORK_CFG_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 NETWORK_CFG="$NETWORK_CFG_DIR/02_network"
 
-# -------------------- 分层依赖定义（字符串形式） --------------------
-# 1. 内核基础依赖（空格分隔的配置项）
+# -------------------- 分层依赖定义 --------------------
+# （保持不变）
 DEPS["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
-
-# 2. 硬件驱动依赖
 DEPS["drivers"]="CONFIG_PACKAGE_kmod-qca-nss-dp=y CONFIG_PACKAGE_kmod-qca-ssdk=y CONFIG_PACKAGE_kmod-mii=y CONFIG_PACKAGE_kmod-phy-qcom-ipq4019=y CONFIG_PACKAGE_kmod-of-mdio=y CONFIG_PACKAGE_kmod-mdio-gpio=y CONFIG_PACKAGE_kmod-fixed-phy=y CONFIG_PACKAGE_kmod-ath10k-ct=y CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y"
-
-# 3. 网络核心依赖
 DEPS["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
-
-# 4. OpenClash 依赖（含中文支持）
 DEPS["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_luci-app-openclash_DNS_HIJACK=y CONFIG_PACKAGE_kmod-tun=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_jsonfilter=y CONFIG_PACKAGE_ca-certificates=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_ruby=y CONFIG_PACKAGE_ruby-yaml=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-base=y CONFIG_PACKAGE_kmod-inet-diag=y CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y"
-
-# 5. Passwall2 依赖（含中文支持）
 DEPS["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y"
-
-# 6. 目标设备配置
 DEPS["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y"
 
-# -------------------- 版本检测与DSA判断 --------------------
+# -------------------- 版本检测与DSA判断（关键修复） --------------------
 detect_openwrt_version() {
+    log_step "检测OpenWrt版本与架构"  # 增加日志，确认函数执行
     local version_file="include/version.mk"
     local major_ver minor_ver
 
-    if [ -f "$version_file" ]; then
-        # 提取主版本号（如22.03、24.10）
-        OPENWRT_VERSION=$(grep '^OPENWRT_VERSION=' "$version_file" | cut -d= -f2 | tr -d ' "')
-        log_info "检测到 OpenWrt 版本: $OPENWRT_VERSION"
-        
-        # 判断是否为DSA架构（22.03+）
-        if [[ "$OPENWRT_VERSION" =~ ^22\.03 || "$OPENWRT_VERSION" =~ ^23\.05 || "$OPENWRT_VERSION" =~ ^24\.10 || "$OPENWRT_VERSION" == "snapshot" ]]; then
-            IS_DSA=true
-            log_info "检测到 DSA 架构（22.03+）"
-        else
-            IS_DSA=false
-            log_info "使用传统网络架构"
-        fi
-
-        # 版本适配：24.10+ 启用nft，旧版本保留iptables
-        if [[ "$OPENWRT_VERSION" =~ ^24\.10 || "$OPENWRT_VERSION" == "snapshot" ]]; then
-            log_info "版本 24.10+ 启用 nft-tproxy 支持"
-            DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
-            DEPS["openclash"]+=" CONFIG_PACKAGE_kmod-nft-tproxy=y"  # 明确添加OpenClash依赖
-        else
-            log_info "旧版本启用 iptables 兼容模式"
-            DEPS["network"]+=" CONFIG_PACKAGE_iptables-mod-nat-extra=y CONFIG_PACKAGE_kmod-ipt-offload=y"
-            DEPS["passwall2"]+=" CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
-        fi
-    else
-        log_warning "未找到版本文件，默认使用DSA架构兼容模式"
+    # 检查版本文件是否存在
+    if [ ! -f "$version_file" ]; then
+        log_warning "未找到版本文件: $version_file（可能路径错误）"
+        log_info "强制使用DSA兼容模式"
         IS_DSA=true
+        return  # 不退出，继续执行
+    fi
+
+    # 读取版本号（关键修复：允许grep失败，避免管道导致脚本退出）
+    OPENWRT_VERSION=$(grep '^OPENWRT_VERSION=' "$version_file" | cut -d= -f2 | tr -d ' "' || true)
+    
+    # 处理版本号为空的情况
+    if [ -z "$OPENWRT_VERSION" ]; then
+        log_warning "无法从 $version_file 中提取版本号"
+        log_info "默认使用DSA架构兼容模式"
+        IS_DSA=true
+        return
+    fi
+
+    # 正常版本处理
+    log_info "检测到 OpenWrt 版本: $OPENWRT_VERSION"
+    
+    # 判断DSA架构
+    if [[ "$OPENWRT_VERSION" =~ ^22\.03 || "$OPENWRT_VERSION" =~ ^23\.05 || "$OPENWRT_VERSION" =~ ^24\.10 || "$OPENWRT_VERSION" == "snapshot" ]]; then
+        IS_DSA=true
+        log_info "检测到 DSA 架构（22.03+）"
+    else
+        IS_DSA=false
+        log_info "使用传统网络架构"
+    fi
+
+    # 版本适配（保持不变）
+    if [[ "$OPENWRT_VERSION" =~ ^24\.10 || "$OPENWRT_VERSION" == "snapshot" ]]; then
+        log_info "版本 24.10+ 启用 nft-tproxy 支持"
+        DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
+        DEPS["openclash"]+=" CONFIG_PACKAGE_kmod-nft-tproxy=y"
+    else
+        log_info "旧版本启用 iptables 兼容模式"
+        DEPS["network"]+=" CONFIG_PACKAGE_iptables-mod-nat-extra=y CONFIG_PACKAGE_kmod-ipt-offload=y"
+        DEPS["passwall2"]+=" CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
     fi
 }
 
-# -------------------- 依赖工具检查 --------------------
+# -------------------- 其他函数（保持不变） --------------------
 check_dependencies() {
+    # （原逻辑不变）
     local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" 
                  "mkdir" "touch" "wc" "awk" "unzip" "xsltproc" "gettext" "dtc" "make" "gcc")
     local missing=()
@@ -118,7 +121,6 @@ check_dependencies() {
     fi
     log_success "依赖工具检查通过"
 
-    # 云环境代理配置（如果有环境变量）
     if [ "$CLOUD_MODE" = "true" ] && [ -n "$HTTP_PROXY" ]; then
         log_info "配置git代理: $HTTP_PROXY"
         git config --global http.proxy "$HTTP_PROXY"
@@ -126,8 +128,8 @@ check_dependencies() {
     fi
 }
 
-# -------------------- 配置缓存管理 --------------------
 init_config_cache() {
+    # （原逻辑不变）
     if [ -f "$CONFIG_FILE" ]; then
         log_debug "加载配置缓存（行数: $(wc -l < "$CONFIG_FILE")）"
         while IFS= read -r line; do
@@ -137,8 +139,8 @@ init_config_cache() {
     fi
 }
 
-# -------------------- 安全文件操作 --------------------
 safe_mkdir() {
+    # （原逻辑不变）
     local dir="$1"
     [ -d "$dir" ] && return 0
     if ! mkdir -p "$dir"; then
@@ -148,6 +150,7 @@ safe_mkdir() {
 }
 
 safe_write_file() {
+    # （原逻辑不变）
     local file="$1"
     local content="$2"
     safe_mkdir "$(dirname "$file")"
@@ -157,17 +160,15 @@ safe_write_file() {
     log_debug "写入文件: $file"
 }
 
-# -------------------- 设备树与网络配置（DSA适配） --------------------
 setup_device_tree() {
+    # （原逻辑不变）
     log_step "配置CM520-79F设备树与网络"
     
-    # 备份已有DTS
     if [ -f "$DTS_FILE" ]; then
         cp "$DTS_FILE" "${DTS_FILE}.bak" || log_error "DTS备份失败"
         log_info "已备份原DTS至 ${DTS_FILE}.bak"
     fi
 
-    # 写入设备树（兼容DSA）
     safe_mkdir "$DTS_DIR"
     local dts_content=$(cat <<'EOF'
 /dts-v1/;
@@ -367,14 +368,11 @@ EOF
     safe_write_file "$DTS_FILE" "$dts_content"
     log_success "DTS文件配置完成"
 
-    # 配置网络接口（DSA/传统模式自动适配）
     safe_mkdir "$NETWORK_CFG_DIR"
     local network_content
     if $IS_DSA; then
-        # DSA模式配置（交换机+lan/wan接口）
         log_info "配置DSA网络（交换机模式）"
-        # 自动设置接口（用户未指定时）
-        [ -z "$LAN_IFACE" ] && LAN_IFACE="lan1 lan2"  # 假设2个LAN口
+        [ -z "$LAN_IFACE" ] && LAN_IFACE="lan1 lan2"
         [ -z "$WAN_IFACE" ] && WAN_IFACE="wan"
         
         network_content=$(cat <<EOF
@@ -386,10 +384,8 @@ ipq40xx_board_detect() {
 	case "\$machine" in
 	"mobipromo,cm520-79f")
 		ucidef_set_interface_loopback
-		# 配置交换机（4个物理端口）
 		ucidef_add_switch "switch0" \\
-			"0u@eth0" "1:lan" "2:lan" "3:wan"  # 端口映射：1-2为LAN，3为WAN
-		# 配置LAN/WAN接口
+			"0u@eth0" "1:lan" "2:lan" "3:wan"
 		ucidef_set_interfaces_lan_wan "$LAN_IFACE" "$WAN_IFACE"
 		;;
 	esac
@@ -398,7 +394,6 @@ boot_hook_add preinit_main ipq40xx_board_detect
 EOF
         )
     else
-        # 传统模式配置（eth接口）
         log_info "配置传统网络（eth接口模式）"
         [ -z "$LAN_IFACE" ] && LAN_IFACE="eth1"
         [ -z "$WAN_IFACE" ] && WAN_IFACE="eth0"
@@ -423,7 +418,6 @@ EOF
     chmod +x "$NETWORK_CFG"
     log_info "网络接口配置完成（LAN: $LAN_IFACE, WAN: $WAN_IFACE）"
 
-    # 配置设备编译规则（DSA兼容）
     if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
         local device_rule=$(cat <<'EOF'
 
@@ -447,14 +441,13 @@ EOF
     fi
 }
 
-# -------------------- 配置项管理（冲突修复） --------------------
 add_config_if_missing() {
+    # （原逻辑不变）
     local config="$1"
     local description="$2"
     
     [ -z "$config" ] && log_error "配置项不能为空"
     
-    # 强制移除旧配置（解决冲突）
     if [ -f "$CONFIG_FILE" ]; then
         sed -i.bak "/^# $config is not set/d" "$CONFIG_FILE"
         sed -i.bak "/^$config=.*$/d" "$CONFIG_FILE"
@@ -474,13 +467,12 @@ add_config_if_missing() {
     [ -n "$description" ] && log_debug "说明: $description"
 }
 
-# 批量添加分层依赖（将字符串拆分为数组）
 add_deps_by_layer() {
+    # （原逻辑不变）
     local layer="$1"
     local deps_str="${DEPS[$layer]}"
-    local -a deps=()  # 临时数组存储拆分后的依赖项
+    local -a deps=()
 
-    # 将空格分隔的字符串拆分为数组
     read -ra deps <<< "$deps_str"
     
     [ ${#deps[@]} -eq 0 ] && return 0
@@ -491,8 +483,8 @@ add_deps_by_layer() {
     done
 }
 
-# -------------------- 插件集成（含内核下载） --------------------
 try_git_mirrors() {
+    # （原逻辑不变）
     local original_repo="$1"
     local temp_dir="$2"
     local mirrors=(
@@ -524,16 +516,15 @@ try_git_mirrors() {
     return 1
 }
 
-# 下载OpenClash内核
 download_clash_core() {
+    # （原逻辑不变）
     local core_dir="/etc/openclash/core"
     local temp_core="/tmp/clash_meta_$$"
-    local arch="armv7"  # 适配CM520-79F架构
+    local arch="armv7"
     
     log_step "下载OpenClash内核（clash_meta）"
     safe_mkdir "$core_dir"
     
-    # 最新版本下载地址（armv7）
     local core_url="https://github.com/MetaCubeX/Clash.Meta/releases/latest/download/clash-meta-linux-armv7"
     
     if ! wget --no-check-certificate -O "$temp_core" "$core_url"; then
@@ -545,20 +536,18 @@ download_clash_core() {
         fi
     fi
     
-    # 安装内核
     mv "$temp_core" "$core_dir/clash_meta"
     chmod +x "$core_dir/clash_meta"
     log_success "Clash内核安装完成: $core_dir/clash_meta"
     return 0
 }
 
-# 导入Passwall2密钥
 import_passwall_keys() {
+    # （原逻辑不变）
     log_step "导入Passwall2软件源密钥"
     local key_dir="/etc/opkg/keys"
     safe_mkdir "$key_dir"
     
-    # 密钥文件（来自官方源）
     local key_urls=(
         "https://openwrt.org/_export/keys/6243C1C880731018A6251B66789C7785659653D"
         "https://github.com/xiaorouji/openwrt-passwall2/raw/main/keys/9a22e228.pub"
@@ -580,11 +569,12 @@ import_passwall_keys() {
 }
 
 fetch_plugin() {
+    # （原逻辑不变）
     local repo="$1"
     local plugin_name="$2"
     local subdir="${3:-.}"
     shift 3
-    local deps_layer="$1"  # 依赖层名称
+    local deps_layer="$1"
     local temp_dir="/tmp/${plugin_name}_$(date +%s)_$$"
     local lock_file="/tmp/.${plugin_name}_lock"
     
@@ -592,14 +582,12 @@ fetch_plugin() {
     log_info "仓库: $repo"
     log_info "目标路径: $CUSTOM_PLUGINS_DIR/$plugin_name"
 
-    # 加锁防止并行冲突
     exec 200>"$lock_file"
     if ! flock -n 200; then
         log_warning "等待插件锁释放..."
         flock 200
     fi
 
-    # 清理旧文件
     local cleanup_paths=(
         "feeds/luci/applications/$plugin_name"
         "feeds/packages/net/$plugin_name"
@@ -614,13 +602,11 @@ fetch_plugin() {
         fi
     done
 
-    # 克隆插件
     if ! try_git_mirrors "$repo" "$temp_dir"; then
         flock -u 200
         return 1
     fi
 
-    # 定位插件目录（查找Makefile）
     local source_path="$temp_dir/$subdir"
     if [ ! -f "$source_path/Makefile" ]; then
         log_info "在子目录搜索Makefile..."
@@ -636,7 +622,6 @@ fetch_plugin() {
         fi
     fi
 
-    # 移动插件到自定义目录
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
     if ! mv "$source_path" "$CUSTOM_PLUGINS_DIR/$plugin_name"; then
         log_error "移动插件失败"
@@ -645,11 +630,9 @@ fetch_plugin() {
         return 1
     fi
 
-    # 清理临时文件并释放锁
     rm -rf "$temp_dir"
     flock -u 200
 
-    # 添加插件依赖
     if [ -n "$deps_layer" ] && [ -n "${DEPS[$deps_layer]}" ]; then
         log_info "添加插件依赖层: $deps_layer"
         add_deps_by_layer "$deps_layer"
@@ -659,8 +642,8 @@ fetch_plugin() {
     return 0
 }
 
-# -------------------- 验证机制 --------------------
 verify_filesystem() {
+    # （原逻辑不变）
     local plugin=$1
     log_step "验证 $plugin 文件系统"
     
@@ -676,6 +659,7 @@ verify_filesystem() {
 }
 
 verify_config_conflicts() {
+    # （原逻辑不变）
     log_step "检查配置冲突"
     local conflicts=(
         "CONFIG_PACKAGE_dnsmasq CONFIG_PACKAGE_dnsmasq-full"
@@ -688,7 +672,6 @@ verify_config_conflicts() {
         local b=$(echo "$pair" | awk '{print $2}')
         if [ -n "${config_cache[$a=y]}" ] && [ -n "${config_cache[$b=y]}" ]; then
             log_error "配置冲突: $a 和 $b 不能同时启用"
-            # 自动修复：保留新版本需要的配置
             if [[ "$a" == *"iptables"* && "$b" == *"nft"* && $IS_DSA ]]; then
                 log_info "自动修复：移除 $a，保留 $b（DSA模式）"
                 sed -i "/^$a=y/d" "$CONFIG_FILE"
@@ -702,26 +685,30 @@ verify_config_conflicts() {
 
 # -------------------- 主流程 --------------------
 main() {
-    log_step "OpenWrt插件集成流程启动（V6）"
+    log_step "OpenWrt插件集成流程启动（V6.1）"
     
-    # 权限提示
     if [ "$EUID" -ne 0 ]; then
         log_warning "建议以root用户运行（当前: $USER）"
     fi
 
-    # 初始化检查
+    # 初始化检查（按顺序执行，增加日志定位）
+    log_info "开始依赖工具检查"
     check_dependencies
+    
+    log_info "开始版本与架构检测"  # 新增日志，确认执行到此处
     detect_openwrt_version
+    
+    log_info "开始配置缓存初始化"
     init_config_cache
+    
+    log_info "创建自定义插件目录"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
 
-    # 调试模式启用
     if [ "$DEBUG_MODE" = "true" ]; then
         log_info "启用调试模式"
         set -x
     fi
 
-    # 检查配置文件
     if [ ! -f "$CONFIG_FILE" ]; then
         log_warning "配置文件不存在，创建空文件"
         touch "$CONFIG_FILE"
@@ -729,21 +716,17 @@ main() {
         log_error "配置文件不可写: $CONFIG_FILE"
     fi
 
-    # 配置设备与网络（DSA适配）
     setup_device_tree
 
-    # 更新feeds（在插件克隆前执行）
     log_step "更新软件源"
     ./scripts/feeds update -a || log_error "feeds更新失败"
     ./scripts/feeds install -a || log_error "feeds安装失败"
 
-    # 添加核心依赖
     add_deps_by_layer "kernel"
     add_deps_by_layer "drivers"
     add_deps_by_layer "network"
     add_deps_by_layer "target"
 
-    # 集成插件
     log_step "集成插件"
     local plugins=(
         "https://github.com/vernesong/OpenClash.git|luci-app-openclash|luci-app-openclash|openclash"
@@ -758,25 +741,20 @@ main() {
         fi
     done
 
-    # 插件后处理
     log_step "插件后处理"
-    download_clash_core  # OpenClash内核
-    import_passwall_keys  # Passwall2密钥
+    download_clash_core
+    import_passwall_keys
 
-    # 验证流程
     verify_filesystem "luci-app-openclash"
     verify_filesystem "luci-app-passwall2"
     verify_config_conflicts
 
-    # 生成最终配置
     log_step "生成最终配置"
     make defconfig || log_error "配置生成失败"
 
-    # 输出配置差异
     log_info "配置变更摘要:"
     grep -E '^CONFIG_PACKAGE_(luci-app-openclash|luci-app-passwall2|kmod-nft-tproxy|iptables)' "$CONFIG_FILE" || true
 
-    # 输出报告
     log_step "集成流程完成"
     if $validation_passed && [ $plugin_count -eq 2 ]; then
         log_success "🎉 所有插件集成成功（数量: $plugin_count）"
@@ -793,5 +771,4 @@ main() {
     fi
 }
 
-# 启动主流程
 main "$@"
