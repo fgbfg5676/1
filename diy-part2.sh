@@ -756,6 +756,17 @@ PASSWALL2_DEPS=(
     "CONFIG_PACKAGE_microsocks=y"
 )
 
+# -------------------- 注释插件函数 --------------------
+comment_config_if_exists() {
+    local config_name="$1"
+    if grep -q "^CONFIG_PACKAGE_${config_name}=" "$CONFIG_FILE"; then
+        sed -i "s/^CONFIG_PACKAGE_${config_name}=.*/# CONFIG_PACKAGE_${config_name} is not set/" "$CONFIG_FILE"
+        log_success "已注释掉插件: $config_name"
+    else
+        log_info "配置 $config_name 不存在，跳过注释"
+    fi
+}
+
 # -------------------- 主流程 --------------------
 main() {
     log_step "开始OpenWrt插件集成与验证流程"
@@ -771,11 +782,13 @@ main() {
     
     # 检查基础环境
     check_config_file || log_warning "配置文件检查有问题，继续执行..."
+    
+    # -------------------- 注释掉不需要的插件 --------------------
+    log_step "注释掉不需要的插件"
+    comment_config_if_exists "luci-app-kms"
 
-# -------------------- 注释掉不需要的插件 --------------------
-log_step "注释掉不需要的插件"
-sed -i 's/^CONFIG_PACKAGE_luci-app-kms=.*/# CONFIG_PACKAGE_luci-app-kms is not set/' "$CONFIG_FILE"
-log_success "插件注释完成"
+    # 这里继续 DTS 配置和插件集成...
+}
 
 	
     # DTS设备树配置
