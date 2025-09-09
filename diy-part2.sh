@@ -771,7 +771,13 @@ main() {
     
     # 检查基础环境
     check_config_file || log_warning "配置文件检查有问题，继续执行..."
-    
+
+# -------------------- 注释掉不需要的插件 --------------------
+log_step "注释掉不需要的插件"
+sed -i 's/^CONFIG_PACKAGE_luci-app-kms=.*/# CONFIG_PACKAGE_luci-app-kms is not set/' "$CONFIG_FILE"
+log_success "插件注释完成"
+
+	
     # DTS设备树配置
     log_step "配置DTS设备树支持"
     if setup_device_tree; then
