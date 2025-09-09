@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.2)
-# 修复：配置缓存初始化失败导致的脚本退出
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.3)
+# 修复：自定义插件目录创建失败导致的退出问题
 
 set -eo pipefail
 export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
@@ -117,11 +117,10 @@ check_dependencies() {
     fi
 }
 
-# -------------------- 配置缓存管理（关键修复） --------------------
+# -------------------- 配置缓存管理 --------------------
 init_config_cache() {
-    log_step "初始化配置缓存"  # 增加步骤日志
+    log_step "初始化配置缓存"
     
-    # 检查文件是否存在且可读
     if [ ! -f "$CONFIG_FILE" ]; then
         log_info "配置文件不存在，缓存为空"
         return 0
@@ -129,21 +128,17 @@ init_config_cache() {
     
     if [ ! -r "$CONFIG_FILE" ]; then
         log_warning "配置文件不可读，跳过缓存初始化"
-        return 0  # 仅警告，不退出
+        return 0
     fi
 
-    # 统计配置项数量（用于日志）
     local total_lines=$(grep -v -E '^#|^$' "$CONFIG_FILE" | wc -l)
     log_info "发现 $total_lines 个有效配置项，开始加载缓存"
 
-    # 读取配置文件（关键修复：使用while循环安全读取，允许单行失败）
     local line_num=0
     while IFS= read -r line; do
         line_num=$((line_num + 1))
-        # 跳过注释和空行
         [[ "$line" =~ ^# || -z "$line" ]] && continue
         
-        # 尝试添加到缓存（捕获可能的错误）
         if ! config_cache["$line"]=1; then
             log_warning "配置项格式异常（行 $line_num）: $line（已跳过）"
         fi
@@ -152,14 +147,59 @@ init_config_cache() {
     log_success "配置缓存初始化完成（加载 $total_lines 项）"
 }
 
-# -------------------- 安全文件操作 --------------------
+# -------------------- 安全文件操作（关键修复） --------------------
 safe_mkdir() {
     local dir="$1"
-    [ -d "$dir" ] && return 0
-    if ! mkdir -p "$dir"; then
-        log_error "无法创建目录: $dir（权限问题）"
+    log_debug "尝试创建目录: $dir"
+
+    # 检查目录是否已存在
+    if [ -d "$dir" ]; then
+        log_debug "目录已存在: $dir"
+        return 0
     fi
-    log_debug "创建目录: $dir"
+
+    # 检查父目录是否存在且可写
+    local parent_dir=$(dirname "$dir")
+    if [ ! -d "$parent_dir" ]; then
+        log_warning "父目录不存在，尝试创建: $parent_dir"
+        if ! mkdir -p "$parent_dir"; then
+            log_error "创建父目录失败: $parent_dir（权限不足或路径无效）"
+        fi
+        log_debug "父目录创建成功: $parent_dir"
+    fi
+
+    # 检查父目录权限
+    if [ ! -w "$parent_dir" ]; then
+        log_warning "父目录不可写，尝试修复权限: $parent_dir"
+        if [ "$(id -u)" -ne 0 ]; then
+            log_warning "非root用户，无法修改权限，尝试sudo（可能需要密码）"
+            if ! sudo chmod u+w "$parent_dir"; then
+                log_error "修复父目录权限失败: $parent_dir（请检查用户权限）"
+            fi
+        else
+            if ! chmod u+w "$parent_dir"; then
+                log_error "修复父目录权限失败: $parent_dir"
+            fi
+        fi
+    fi
+
+    # 尝试创建目标目录
+    if ! mkdir -p "$dir"; then
+        # 终极方案：使用临时目录替代（仅在云环境）
+        if [ "$CLOUD_MODE" = "true" ]; then
+            log_warning "创建目标目录失败，使用临时目录替代"
+            dir="/tmp/custom_plugins_$$"
+            mkdir -p "$dir"
+            CUSTOM_PLUGINS_DIR="$dir"  # 全局替换目录路径
+            log_info "已自动切换插件目录至: $dir"
+            return 0
+        else
+            log_error "创建目录失败: $dir（请检查路径和权限）"
+        fi
+    fi
+
+    log_debug "目录创建成功: $dir"
+    return 0
 }
 
 safe_write_file() {
@@ -692,7 +732,7 @@ verify_config_conflicts() {
 
 # -------------------- 主流程 --------------------
 main() {
-    log_step "OpenWrt插件集成流程启动（V6.2）"
+    log_step "OpenWrt插件集成流程启动（V6.3）"
     
     if [ "$EUID" -ne 0 ]; then
         log_warning "建议以root用户运行（当前: $USER）"
@@ -705,10 +745,11 @@ main() {
     detect_openwrt_version
     
     log_info "开始配置缓存初始化"
-    init_config_cache  # 调用修复后的函数
+    init_config_cache
     
-    log_info "创建自定义插件目录"
+    log_info "创建自定义插件目录: $CUSTOM_PLUGINS_DIR"  # 明确显示目录路径
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
+    log_success "自定义插件目录准备完成"  # 新增成功日志
 
     if [ "$DEBUG_MODE" = "true" ]; then
         log_info "启用调试模式"
