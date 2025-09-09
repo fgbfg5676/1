@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.0-内核下载增强版)
-# 优化：动态获取最新 OpenClash 插件与内核，增加下载镜像源，修复校验逻辑
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.1-错误修复版)
+# 修复：解决 add_deps_by_layer 函数中可能出现的“bad array subscript”错误
 #
 
 set -eo pipefail
@@ -16,7 +16,7 @@ log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; 
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-log_step "开始 OpenWrt 插件集成流程（V7.0-内核下载增强版）"
+log_step "开始 OpenWrt 插件集成流程（V7.1-错误修复版）"
 
 validation_passed=true
 plugin_count=0
@@ -41,7 +41,7 @@ declare -A DEPS=(
     ["drivers"]="CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y CONFIG_PACKAGE_kmod-ipt-core=y CONFIG_PACKAGE_kmod-ipt-nat=y CONFIG_PACKAGE_kmod-ipt-conntrack=y CONFIG_PACKAGE_kmod-ath10k=y CONFIG_PACKAGE_ath10k-firmware-qca4019=y CONFIG_PACKAGE_kmod-mii=y"
     ["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
     ["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_kmod-tun=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_jsonfilter=y CONFIG_PACKAGE_ca-certificates=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_ruby=y CONFIG_PACKAGE_ruby-yaml=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-base=y CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y CONFIG_PACKAGE_iptables-mod-tproxy=y"
-    ["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_tuic-client=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y"
+    ["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_tuic-client=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
     ["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y"
 )
 
@@ -210,8 +210,7 @@ setup_device_tree() {
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
-        )
-        safe_write_file "$DTS_FILE" "$dts_content"; log_success "DTS 文件写入完成（默认内容，coolsnowwolf 兼容）";
+        ); safe_write_file "$DTS_FILE" "$dts_content"; log_success "DTS 文件写入完成（默认内容，coolsnowwolf 兼容）";
     fi
     local network_content; if $IS_DSA; then log_info "配置 DSA 网络（交换机模式）"; LAN_IFACE="lan1 lan2"; WAN_IFACE="wan"; network_content=$(cat <<EOF
 #!/bin/sh
@@ -221,15 +220,13 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-        );
-    else log_info "配置传统网络（eth 接口模式，coolsnowwolf 兼容）"; network_content=$(cat <<EOF
+        ); else log_info "配置传统网络（eth 接口模式，coolsnowwolf 兼容）"; network_content=$(cat <<EOF
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() { local machine; machine=\$(board_name); case "\$machine" in "mobipromo,cm520-79f") ucidef_set_interfaces_lan_wan "$LAN_IFACE" "$WAN_IFACE"; ;; esac }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-        );
-    fi
+        ); fi
     safe_write_file "$NETWORK_CFG" "$network_content"; chmod +x "$NETWORK_CFG"; log_info "网络接口配置完成（LAN: $LAN_IFACE, WAN: $WAN_IFACE）";
     if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
         local device_rule=$(cat <<'EOF'
@@ -328,7 +325,7 @@ download_clash_core() {
     log_info "开始下载内核..."
     for mirror in "${mirrors[@]}"; do
         if wget --no-check-certificate -O "$temp_gz_file" "$mirror" >/dev/null 2>&1; then
-            if [ -s "$temp_gz_file" ]; then # 检查文件大小是否为零
+            if [ -s "$temp_gz_file" ]; then
                 if gunzip -t "$temp_gz_file" >/dev/null 2>&1; then
                     download_succeeded=true
                     break
@@ -388,7 +385,17 @@ fetch_plugin() {
     fi
     if ! mv "$source_path" "$CUSTOM_PLUGINS_DIR/$plugin_name"; then log_error "移动插件失败: $plugin_name"; rm -rf "$temp_dir"; flock -u 200; return 1; fi
     rm -rf "$temp_dir"; flock -u 200;
-    if [ -n "$deps_layer" ] && [ -n "${DEPS[$deps_layer]}" ]; then log_info "添加插件依赖层: $deps_layer"; add_deps_by_layer "$deps_layer"; fi
+    
+    # 修复后的依赖添加逻辑
+    if [ -n "$deps_layer" ]; then
+        if [ -n "${DEPS[$deps_layer]}" ]; then
+            log_info "添加插件依赖层: $deps_layer"
+            add_deps_by_layer "$deps_layer"
+        else
+            log_warning "依赖层 '$deps_layer' 不存在或为空，跳过依赖添加。"
+        fi
+    fi
+    
     log_success "$plugin_name 集成完成"; plugin_count=$((plugin_count + 1)); return 0;
 }
 
@@ -430,7 +437,7 @@ main() {
     local plugins=(
         "https://github.com/vernesong/OpenClash.git|luci-app-openclash|luci-app-openclash|openclash"
         "https://github.com/xiaorouji/openwrt-passwall2.git|luci-app-passwall2|.|passwall2"
-        "https://github.com/sirpdboy/luci-app-partexp.git|luci-app-partexp|.|"
+        "https://github.com/sirpdboy/luci-app-partexp.git|luci-app-partexp|.|partexp"
     )
     for plugin in "${plugins[@]}"; do IFS='|' read -r repo name subdir deps_layer <<< "$plugin"; if fetch_plugin "$repo" "$name" "$subdir" "$deps_layer"; then true; else log_warning "$name 集成失败，继续其他插件"; fi; done
     log_step "插件后处理"
