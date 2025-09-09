@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.1-错误修复版)
-# 修复：解决 add_deps_by_layer 函数中可能出现的“bad array subscript”错误
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.2-最终修复版)
+# 修复：加固 add_deps_by_layer 函数，确保其健壮性，防止“bad array subscript”错误
 #
 
 set -eo pipefail
@@ -16,7 +16,7 @@ log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; 
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-log_step "开始 OpenWrt 插件集成流程（V7.1-错误修复版）"
+log_step "开始 OpenWrt 插件集成流程（V7.2-最终修复版）"
 
 validation_passed=true
 plugin_count=0
@@ -257,7 +257,14 @@ add_config_if_missing() {
     config_cache["$config"]=1; log_info "添加配置: $config ($description)";
 }
 add_deps_by_layer() {
-    local layer="$1" deps_str="${DEPS[$layer]}"
+    local layer="$1"
+    # 增加对空键的检查，确保传入的层名是有效的
+    if [ -z "$layer" ] || [ -z "${DEPS[$layer]}" ]; then
+        log_warning "依赖层 '$layer' 不存在或为空，跳过依赖添加。"
+        return 1
+    fi
+
+    local deps_str="${DEPS[$layer]}"
     local -a deps=(); read -ra deps <<< "$deps_str"
     [ ${#deps[@]} -eq 0 ] && return 0
     log_step "添加 [$layer] 层依赖（共 ${#deps[@]} 项）"
@@ -386,15 +393,8 @@ fetch_plugin() {
     if ! mv "$source_path" "$CUSTOM_PLUGINS_DIR/$plugin_name"; then log_error "移动插件失败: $plugin_name"; rm -rf "$temp_dir"; flock -u 200; return 1; fi
     rm -rf "$temp_dir"; flock -u 200;
     
-    # 修复后的依赖添加逻辑
-    if [ -n "$deps_layer" ]; then
-        if [ -n "${DEPS[$deps_layer]}" ]; then
-            log_info "添加插件依赖层: $deps_layer"
-            add_deps_by_layer "$deps_layer"
-        else
-            log_warning "依赖层 '$deps_layer' 不存在或为空，跳过依赖添加。"
-        fi
-    fi
+    # 修复后的依赖添加逻辑，将检查推迟到 add_deps_by_layer 内部处理
+    add_deps_by_layer "$deps_layer"
     
     log_success "$plugin_name 集成完成"; plugin_count=$((plugin_count + 1)); return 0;
 }
