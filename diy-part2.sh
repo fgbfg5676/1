@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.4)
-# 修复：OpenWrt源码目录检测与绝对路径适配
+# OpenWrt 插件集成脚本 - 权限增强版 (V6.6)
+# 特性：增强云模式权限处理、详细调试日志、临时目录支持
 
 set -eo pipefail
 export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
@@ -17,17 +17,17 @@ log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \0
 validation_passed=true
 plugin_count=0
 CONFIG_FILE=".config"
-CUSTOM_PLUGINS_DIR="package/custom"  # 默认相对路径，后续会转为绝对路径
+CUSTOM_PLUGINS_DIR="${CUSTOM_PLUGINS_DIR:-package/custom}"  # 支持外部设置
 DEBUG_MODE=${DEBUG_MODE:-"false"}
-CLOUD_MODE=${CLOUD_MODE:-"true"}
+CLOUD_MODE=${CLOUD_MODE:-"false"}
 
 LAN_IFACE=${LAN_IFACE:-""}
 WAN_IFACE=${WAN_IFACE:-""}
-IS_DSA=false  # DSA架构标记
-OPENWRT_ROOT_DIR=""  # OpenWrt源码根目录（自动检测）
+IS_DSA=false
+OPENWRT_ROOT_DIR=""
 
 declare -A config_cache=()
-declare -A DEPS=()  # 分层依赖管理（值为空格分隔的字符串）
+declare -A DEPS=()
 GIT_CONNECT_TIMEOUT=30
 GIT_CLONE_TIMEOUT=1800
 MAX_RETRIES=3
@@ -35,16 +35,14 @@ OPENWRT_VERSION="unknown"
 
 trap 'rm -rf /tmp/*_$$ 2>/dev/null || true' EXIT
 
-# -------------------- 关键修复：检测OpenWrt源码根目录 --------------------
+# -------------------- 源码目录检测 --------------------
 detect_openwrt_root() {
     log_step "检测OpenWrt源码根目录"
     
-    # 检查标志性文件以确认是否为OpenWrt源码根目录
     local marker_files=("include/toplevel.mk" "package/Makefile" "scripts/feeds")
     local current_dir=$(pwd)
     local check_dirs=("$current_dir" "$current_dir/openwrt" "$current_dir/source" "/workspace/openwrt")
 
-    # 尝试用户提供的目录（如果设置）
     if [ -n "$OPENWRT_DIR" ]; then
         check_dirs=("$OPENWRT_DIR" "${check_dirs[@]}")
     fi
@@ -65,7 +63,6 @@ detect_openwrt_root() {
         fi
     done
 
-    # 终极方案：如果找不到，尝试创建临时源码目录（仅云环境）
     if [ "$CLOUD_MODE" = "true" ]; then
         log_warning "未检测到OpenWrt源码，创建临时工作目录"
         OPENWRT_ROOT_DIR="/tmp/openwrt_$$"
@@ -74,17 +71,10 @@ detect_openwrt_root() {
         return 0
     fi
 
-    log_error "未找到OpenWrt源码根目录，请确保在源码目录中运行或设置OPENWRT_DIR环境变量"
+    log_error "未找到OpenWrt源码根目录，请设置OPENWRT_DIR环境变量"
 }
 
-# -------------------- 设备配置路径（使用绝对路径） --------------------
-DTS_DIR=""
-DTS_FILE=""
-GENERIC_MK=""
-NETWORK_CFG_DIR=""
-NETWORK_CFG=""
-
-# 初始化路径（在检测到根目录后调用）
+# -------------------- 路径初始化 --------------------
 init_paths() {
     DTS_DIR="$OPENWRT_ROOT_DIR/target/linux/ipq40xx/files/arch/arm/boot/dts"
     DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
@@ -92,10 +82,17 @@ init_paths() {
     NETWORK_CFG_DIR="$OPENWRT_ROOT_DIR/target/linux/ipq40xx/base-files/etc/board.d"
     NETWORK_CFG="$NETWORK_CFG_DIR/02_network"
     CONFIG_FILE="$OPENWRT_ROOT_DIR/.config"
-    CUSTOM_PLUGINS_DIR="$OPENWRT_ROOT_DIR/package/custom"  # 转为绝对路径
+    
+    # 如果未外部指定插件目录，使用默认绝对路径
+    if [ -z "${CUSTOM_PLUGINS_DIR_OVERRIDE:-}" ]; then
+        CUSTOM_PLUGINS_DIR="$OPENWRT_ROOT_DIR/package/custom"
+    else
+        CUSTOM_PLUGINS_DIR="$CUSTOM_PLUGINS_DIR_OVERRIDE"
+        log_info "使用外部指定的插件目录: $CUSTOM_PLUGINS_DIR"
+    fi
 }
 
-# -------------------- 分层依赖定义 --------------------
+# -------------------- 依赖定义（保持不变） --------------------
 DEPS["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
 DEPS["drivers"]="CONFIG_PACKAGE_kmod-qca-nss-dp=y CONFIG_PACKAGE_kmod-qca-ssdk=y CONFIG_PACKAGE_kmod-mii=y CONFIG_PACKAGE_kmod-phy-qcom-ipq4019=y CONFIG_PACKAGE_kmod-of-mdio=y CONFIG_PACKAGE_kmod-mdio-gpio=y CONFIG_PACKAGE_kmod-fixed-phy=y CONFIG_PACKAGE_kmod-ath10k-ct=y CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y"
 DEPS["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
@@ -103,13 +100,13 @@ DEPS["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_luci-app-o
 DEPS["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y"
 DEPS["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y"
 
-# -------------------- 版本检测与DSA判断 --------------------
+# -------------------- 版本检测（保持不变） --------------------
 detect_openwrt_version() {
     log_step "检测OpenWrt版本与架构"
     local version_file="$OPENWRT_ROOT_DIR/include/version.mk"
 
     if [ ! -f "$version_file" ]; then
-        log_warning "未找到版本文件: $version_file（可能路径错误）"
+        log_warning "未找到版本文件: $version_file"
         log_info "强制使用DSA兼容模式"
         IS_DSA=true
         return
@@ -145,7 +142,7 @@ detect_openwrt_version() {
     fi
 }
 
-# -------------------- 依赖工具检查 --------------------
+# -------------------- 依赖工具检查（保持不变） --------------------
 check_dependencies() {
     local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" 
                  "mkdir" "touch" "wc" "awk" "unzip" "xsltproc" "gettext" "dtc" "make" "gcc")
@@ -170,7 +167,7 @@ check_dependencies() {
     fi
 }
 
-# -------------------- 配置缓存管理 --------------------
+# -------------------- 配置缓存管理（保持不变） --------------------
 init_config_cache() {
     log_step "初始化配置缓存"
     
@@ -200,50 +197,68 @@ init_config_cache() {
     log_success "配置缓存初始化完成（加载 $total_lines 项）"
 }
 
-# -------------------- 安全文件操作 --------------------
+# -------------------- 安全文件操作（增强权限处理） --------------------
 safe_mkdir() {
     local dir="$1"
     log_debug "尝试创建目录: $dir"
 
+    # 目录已存在直接返回
     if [ -d "$dir" ]; then
         log_debug "目录已存在: $dir"
         return 0
     fi
 
+    # 获取父目录
     local parent_dir=$(dirname "$dir")
+    log_debug "父目录: $parent_dir"
+
+    # 调试模式下显示目录权限信息
+    if [ "$DEBUG_MODE" = "true" ] && [ -d "$parent_dir" ]; then
+        log_debug "父目录权限: $(ls -ld "$parent_dir")"
+        log_debug "当前用户: $(id)"
+    fi
+
+    # 云模式特判：直接使用临时目录绕过权限问题
+    if [ "$CLOUD_MODE" = "true" ]; then
+        log_warning "云模式：强制使用临时目录绕过权限检查"
+        dir="/tmp/custom_plugins_$$"
+        mkdir -p "$dir"
+        # 全局更新插件目录
+        CUSTOM_PLUGINS_DIR="$dir"
+        log_info "已自动切换插件目录至: $dir"
+        return 0
+    fi
+
+    # 非云模式：尝试创建父目录
     if [ ! -d "$parent_dir" ]; then
         log_warning "父目录不存在，尝试创建: $parent_dir"
         if ! mkdir -p "$parent_dir"; then
-            log_error "创建父目录失败: $parent_dir（权限不足或路径无效）"
+            log_error "创建父目录失败: $parent_dir（权限不足）"
         fi
         log_debug "父目录创建成功: $parent_dir"
     fi
 
+    # 检查父目录可写性
     if [ ! -w "$parent_dir" ]; then
         log_warning "父目录不可写，尝试修复权限: $parent_dir"
+        
+        # 非root用户尝试sudo
         if [ "$(id -u)" -ne 0 ]; then
             log_warning "非root用户，尝试sudo提升权限"
             if ! sudo chmod u+w "$parent_dir"; then
-                log_error "修复父目录权限失败: $parent_dir（请检查用户权限）"
+                log_error "sudo修复权限失败，请手动检查或使用云模式"
             fi
         else
+            # root用户直接修复
             if ! chmod u+w "$parent_dir"; then
                 log_error "修复父目录权限失败: $parent_dir"
             fi
         fi
     fi
 
+    # 尝试创建目标目录
     if ! mkdir -p "$dir"; then
-        if [ "$CLOUD_MODE" = "true" ]; then
-            log_warning "创建目标目录失败，使用系统临时目录"
-            dir="/tmp/custom_plugins_$$"
-            mkdir -p "$dir"
-            CUSTOM_PLUGINS_DIR="$dir"
-            log_info "已自动切换插件目录至: $dir"
-            return 0
-        else
-            log_error "创建目录失败: $dir（请检查路径和权限）"
-        fi
+        log_error "创建目录失败: $dir（最终尝试失败）"
     fi
 
     log_debug "目录创建成功: $dir"
@@ -260,7 +275,7 @@ safe_write_file() {
     log_debug "写入文件: $file"
 }
 
-# -------------------- 设备树与网络配置 --------------------
+# -------------------- 其他函数保持不变 --------------------
 setup_device_tree() {
     log_step "配置CM520-79F设备树与网络"
     
@@ -541,7 +556,6 @@ EOF
     fi
 }
 
-# -------------------- 配置项管理 --------------------
 add_config_if_missing() {
     local config="$1"
     local description="$2"
@@ -582,7 +596,6 @@ add_deps_by_layer() {
     done
 }
 
-# -------------------- 插件集成 --------------------
 try_git_mirrors() {
     local original_repo="$1"
     local temp_dir="$2"
@@ -738,7 +751,6 @@ fetch_plugin() {
     return 0
 }
 
-# -------------------- 验证机制 --------------------
 verify_filesystem() {
     local plugin=$1
     log_step "验证 $plugin 文件系统"
@@ -780,15 +792,20 @@ verify_config_conflicts() {
 
 # -------------------- 主流程 --------------------
 main() {
-    log_step "OpenWrt插件集成流程启动（V6.4）"
+    log_step "OpenWrt插件集成流程启动（V6.6）"
     
+    # 调试模式提示
+    if [ "$DEBUG_MODE" = "true" ]; then
+        log_warning "⚠️  调试模式已启用，将输出详细日志"
+    fi
+
     if [ "$EUID" -ne 0 ]; then
         log_warning "建议以root用户运行（当前: $USER）"
     fi
 
-    # 关键修复：先检测源码根目录
+    # 检测源码目录
     detect_openwrt_root
-    init_paths  # 初始化所有绝对路径
+    init_paths
 
     log_info "开始依赖工具检查"
     check_dependencies
@@ -799,6 +816,7 @@ main() {
     log_info "开始配置缓存初始化"
     init_config_cache
     
+    # 显示当前插件目录（便于调试）
     log_info "创建自定义插件目录: $CUSTOM_PLUGINS_DIR"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
     log_success "自定义插件目录准备完成"
