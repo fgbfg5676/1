@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.7-修复版)
-# 修复：移除过期模块、兼容性检查、依赖项验证
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.8-内核更新版)
+# 优化：动态获取最新 OpenClash 内核，更新 Passwall2 依赖
 #
 
 set -eo pipefail
@@ -9,14 +9,14 @@ export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
 
 # -------------------- 日志函数 --------------------
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }
-log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
+log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
-log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
+log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-log_step "开始 OpenWrt 插件集成流程（V6.7-修复版）"
+log_step "开始 OpenWrt 插件集成流程（V6.8-内核更新版）"
 
 validation_passed=true
 plugin_count=0
@@ -36,14 +36,13 @@ IS_DSA=false
 
 declare -A config_cache=()
 
-# 修复版依赖定义 - 移除已废弃模块，添加兼容性检查
+# V6.8 更新：为 Passwall2 添加 tuic-client 依赖
 declare -A DEPS=(
     ["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
-    # drivers: 移除 kmod-nf-nathelper-extra (已废弃), 简化为基础必需模块
     ["drivers"]="CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y CONFIG_PACKAGE_kmod-ipt-core=y CONFIG_PACKAGE_kmod-ipt-nat=y CONFIG_PACKAGE_kmod-ipt-conntrack=y CONFIG_PACKAGE_kmod-ath10k=y CONFIG_PACKAGE_ath10k-firmware-qca4019=y CONFIG_PACKAGE_kmod-mii=y"
     ["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
     ["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_kmod-tun=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_jsonfilter=y CONFIG_PACKAGE_ca-certificates=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_ruby=y CONFIG_PACKAGE_ruby-yaml=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-base=y CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y CONFIG_PACKAGE_iptables-mod-tproxy=y"
-    ["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y"
+    ["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_tuic-client=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y"
     ["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y"
 )
 
@@ -98,7 +97,8 @@ check_environment() {
 # -------------------- 依赖工具检查 --------------------
 check_dependencies() {
     log_step "检查依赖工具"
-    local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" "mkdir" "touch" "wc" "awk" "unzip" "wget" "curl" "gettext" "make" "gcc")
+    # V6.8 新增 jq 依赖
+    local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" "mkdir" "touch" "wc" "awk" "unzip" "wget" "curl" "gettext" "make" "gcc" "jq")
     local missing=()
     
     for tool in "${tools[@]}"; do
@@ -118,130 +118,123 @@ check_dependencies() {
     log_success "依赖工具检查通过"
 }
 
+# ... (detect_openwrt_version, init_config_cache, safe_mkdir, safe_write_file, setup_device_tree, add_config_if_missing, add_deps_by_layer, try_git_mirrors 函数与原版相同，此处省略以节省篇幅) ...
+# NOTE: The user is expected to copy the whole script, so I will include the unchanged parts for completeness.
 # -------------------- 版本检测与 DSA 判断 --------------------
 detect_openwrt_version() {
-    log_step "检测 OpenWrt/LEDE 版本与架构"
-    local version_file="include/version.mk"
-    
-    if [ -d ".git" ]; then
-        local git_ver=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || git rev-parse --abbrev-ref HEAD | sed 's/lede-//' || echo "master")
-        if [[ "$git_ver" =~ ([0-9]{4})([0-9]{2})([0-9]{2}) ]]; then
-            OPENWRT_VERSION="21.02"
-            log_info "日期格式或 master 分支，假设为 $OPENWRT_VERSION (legacy 模式)"
-        else
-            OPENWRT_VERSION="$git_ver"
-        fi
-        log_info "从 Git 提取版本: $OPENWRT_VERSION (coolsnowwolf/lede)"
-    elif [ -f "$version_file" ]; then
-        OPENWRT_VERSION=$(grep '^OPENWRT_VERSION=' "$version_file" | cut -d= -f2 | tr -d ' "' || echo "master")
-        log_info "从 version.mk 提取版本: $OPENWRT_VERSION"
-    else
-        log_warning "未找到版本文件或 Git 仓库，假设 master (legacy)"
-        OPENWRT_VERSION="master"
-    fi
-    
-    # DSA 判断
-    if [[ "$OPENWRT_VERSION" =~ ^(23\.05|24\.10|snapshot) ]]; then
-        IS_DSA=true
-        log_info "检测到 DSA 架构（23.05+）"
-        DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
-        DEPS["openclash"]+=" CONFIG_PACKAGE_kmod-nft-tproxy=y"
-    else
-        IS_DSA=false
-        log_info "使用传统网络架构 (swconfig, 兼容 coolsnowwolf/lede)"
-        DEPS["network"]+=" CONFIG_PACKAGE_iptables-mod-nat-extra=y CONFIG_PACKAGE_kmod-ipt-offload=y"
-        DEPS["passwall2"]+=" CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
-    fi
-    
-    # 清理冲突 WiFi 配置
-    if [ -f "$CONFIG_FILE" ] && grep -q "kmod-ath10k-ct\|ath10k-firmware-qca4019-ct" "$CONFIG_FILE"; then
-        log_warning "检测到 CT WiFi 配置，移除以使用标准版"
-        sed -i '/kmod-ath10k-ct\|ath10k-firmware-qca4019-ct/d' "$CONFIG_FILE"
-    fi
-    log_success "版本检测完成 (legacy 优先)"
+    log_step "检测 OpenWrt/LEDE 版本与架构"
+    local version_file="include/version.mk"
+    
+    if [ -d ".git" ]; then
+        local git_ver=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || git rev-parse --abbrev-ref HEAD | sed 's/lede-//' || echo "master")
+        if [[ "$git_ver" =~ ([0-9]{4})([0-9]{2})([0-9]{2}) ]]; then
+            OPENWRT_VERSION="21.02"
+            log_info "日期格式或 master 分支，假设为 $OPENWRT_VERSION (legacy 模式)"
+        else
+            OPENWRT_VERSION="$git_ver"
+        fi
+        log_info "从 Git 提取版本: $OPENWRT_VERSION (coolsnowwolf/lede)"
+    elif [ -f "$version_file" ]; then
+        OPENWRT_VERSION=$(grep '^OPENWRT_VERSION=' "$version_file" | cut -d= -f2 | tr -d ' "' || echo "master")
+        log_info "从 version.mk 提取版本: $OPENWRT_VERSION"
+    else
+        log_warning "未找到版本文件或 Git 仓库，假设 master (legacy)"
+        OPENWRT_VERSION="master"
+    fi
+    
+    # DSA 判断
+    if [[ "$OPENWRT_VERSION" =~ ^(23\.05|24\.10|snapshot) ]]; then
+        IS_DSA=true
+        log_info "检测到 DSA 架构（23.05+）"
+        DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
+        DEPS["openclash"]+=" CONFIG_PACKAGE_kmod-nft-tproxy=y"
+    else
+        IS_DSA=false
+        log_info "使用传统网络架构 (swconfig, 兼容 coolsnowwolf/lede)"
+        DEPS["network"]+=" CONFIG_PACKAGE_iptables-mod-nat-extra=y CONFIG_PACKAGE_kmod-ipt-offload=y"
+        DEPS["passwall2"]+=" CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
+    fi
+    
+    # 清理冲突 WiFi 配置
+    if [ -f "$CONFIG_FILE" ] && grep -q "kmod-ath10k-ct\|ath10k-firmware-qca4019-ct" "$CONFIG_FILE"; then
+        log_warning "检测到 CT WiFi 配置，移除以使用标准版"
+        sed -i '/kmod-ath10k-ct\|ath10k-firmware-qca4019-ct/d' "$CONFIG_FILE"
+    fi
+    log_success "版本检测完成 (legacy 优先)"
 }
 
 # -------------------- 配置缓存管理 --------------------
 init_config_cache() {
-    log_step "初始化配置缓存"
-    if [ ! -f "$CONFIG_FILE" ]; then
-        log_info "配置文件不存在，创建空文件"
-        touch "$CONFIG_FILE"
-        return 0
-    fi
-    if [ ! -r "$CONFIG_FILE" ]; then
-        log_warning "配置文件不可读，跳过缓存"
-        return 0
-    fi
-    local total_lines=$(grep -v -E '^#|^$' "$CONFIG_FILE" | wc -l)
-    log_info "发现 $total_lines 个有效配置项，开始加载缓存"
-    local line_num=0
-    while IFS= read -r line; do
-        line_num=$((line_num + 1))
-        [[ "$line" =~ ^# || -z "$line" ]] && continue
-        config_cache["$line"]=1
-    done < "$CONFIG_FILE"
-    log_success "配置缓存初始化完成（加载 $total_lines 项）"
+    log_step "初始化配置缓存"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_info "配置文件不存在，创建空文件"
+        touch "$CONFIG_FILE"
+        return 0
+    fi
+    if [ ! -r "$CONFIG_FILE" ]; then
+        log_warning "配置文件不可读，跳过缓存"
+        return 0
+    fi
+    local total_lines=$(grep -v -E '^#|^$' "$CONFIG_FILE" | wc -l)
+    log_info "发现 $total_lines 个有效配置项，开始加载缓存"
+    while IFS= read -r line; do
+        [[ "$line" =~ ^# || -z "$line" ]] && continue
+        config_cache["$line"]=1
+    done < "$CONFIG_FILE"
+    log_success "配置缓存初始化完成（加载 $total_lines 项）"
 }
 
 # -------------------- 安全文件操作 --------------------
 safe_mkdir() {
-    local dir="$1"
-    [ -d "$dir" ] && return 0
-    if ! mkdir -p "$dir"; then
-        log_error "无法创建目录: $dir（权限问题）"
-    fi
-    log_info "创建目录: $dir"
+    local dir="$1"
+    [ -d "$dir" ] && return 0
+    if ! mkdir -p "$dir"; then
+        log_error "无法创建目录: $dir（权限问题）"
+    fi
+    log_info "创建目录: $dir"
 }
 
 safe_write_file() {
-    local file="$1"
-    local content="$2"
-    safe_mkdir "$(dirname "$file")"
-    if ! echo "$content" > "$file"; then
-        log_error "无法写入文件: $file"
-    fi
-    log_info "写入文件: $file"
+    local file="$1"
+    local content="$2"
+    safe_mkdir "$(dirname "$file")"
+    if ! echo "$content" > "$file"; then
+        log_error "无法写入文件: $file"
+    fi
+    log_info "写入文件: $file"
 }
 
 # -------------------- 设备树与网络配置（DTS 保护） --------------------
 setup_device_tree() {
-    log_step "配置 CM520-79F 设备树与网络"
-    safe_mkdir "$DTS_DIR"
-    
-    # DTS 保护：如果存在且非空，跳过覆盖
-    if [ -f "$DTS_FILE" ] && [ -s "$DTS_FILE" ]; then
-        if [ ! -f "${DTS_FILE}.bak" ]; then
-            cp "$DTS_FILE" "${DTS_FILE}.bak"
-            log_info "备份自定义 DTS 至 ${DTS_FILE}.bak"
-        fi
-        log_success "检测到自定义 DTS，跳过覆盖，保留现有文件"
-    else
-        # 这里保持原始 DTS 内容不变
-        local dts_content=$(cat <<'EOF'
+    log_step "配置 CM520-79F 设备树与网络"
+    safe_mkdir "$DTS_DIR"
+    
+    if [ -f "$DTS_FILE" ] && [ -s "$DTS_FILE" ]; then
+        if [ ! -f "${DTS_FILE}.bak" ]; then
+            cp "$DTS_FILE" "${DTS_FILE}.bak"
+            log_info "备份自定义 DTS 至 ${DTS_FILE}.bak"
+        fi
+        log_success "检测到自定义 DTS，跳过覆盖，保留现有文件"
+    else
+        local dts_content=$(cat <<'EOF'
 /dts-v1/;
 /* SPDX-License-Identifier: GPL-2.0-or-later OR MIT */
-
 #include "qcom-ipq4019.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/soc/qcom,tcsr.h>
-
 / {
 	model = "MobiPromo CM520-79F";
 	compatible = "mobipromo,cm520-79f";
-
 	aliases {
 		led-boot = &led_sys;
 		led-failsafe = &led_sys;
 		led-running = &led_sys;
 		led-upgrade = &led_sys;
 	};
-
 	chosen {
 		bootargs-append = " ubi.block=0,1 root=/dev/ubiblock0_1";
 	};
-
 	soc {
 		rng@22000 { status = "okay"; };
 		mdio@90000 {
@@ -294,7 +287,6 @@ setup_device_tree() {
 		ess-switch@c000000 { status = "okay"; };
 		edma@c080000 { status = "okay"; };
 	};
-
 	led_spi {
 		compatible = "spi-gpio";
 		#address-cells = <1>;
@@ -311,7 +303,6 @@ setup_device_tree() {
 			spi-max-frequency = <1000000>;
 		};
 	};
-
 	leds {
 		compatible = "gpio-leds";
 		usb {
@@ -335,7 +326,6 @@ setup_device_tree() {
 			linux,default-trigger = "phy1tpt";
 		};
 	};
-
 	keys {
 		compatible = "gpio-keys";
 		reset {
@@ -345,24 +335,20 @@ setup_device_tree() {
 		};
 	};
 };
-
 &blsp_dma { status = "okay"; };
 &blsp1_uart1 { status = "okay"; };
 &blsp1_uart2 { status = "okay"; };
 &cryptobam { status = "okay"; };
-
 &gmac0 {
 	status = "okay";
 	nvmem-cells = <&macaddr_art_1006>;
 	nvmem-cell-names = "mac-address";
 };
-
 &gmac1 {
 	status = "okay";
 	nvmem-cells = <&macaddr_art_5006>;
 	nvmem-cell-names = "mac-address";
 };
-
 &nand {
 	pinctrl-0 = <&nand_pins>;
 	pinctrl-names = "default";
@@ -389,9 +375,7 @@ setup_device_tree() {
 		};
 	};
 };
-
 &qpic_bam { status = "okay"; };
-
 &tlmm {
 	mdio_pins: mdio_pinmux {
 		mux_1 { pins = "gpio6"; function = "mdio"; bias-pull-up; };
@@ -402,26 +386,25 @@ setup_device_tree() {
 		pulldowns { pins = "gpio54", "gpio55", "gpio56", "gpio57", "gpio60", "gpio61", "gpio62", "gpio63", "gpio64", "gpio65", "gpio66", "gpio67", "gpio68", "gpio69"; function = "qpic"; bias-pull-down; };
 	};
 };
-
 &usb3_ss_phy { status = "okay"; };
 &usb3_hs_phy { status = "okay"; };
 &usb2_hs_phy { status = "okay"; };
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
-        )
-        safe_write_file "$DTS_FILE" "$dts_content"
-        log_success "DTS 文件写入完成（默认内容，coolsnowwolf 兼容）"
-    fi
+        )
+        safe_write_file "$DTS_FILE" "$dts_content"
+        log_success "DTS 文件写入完成（默认内容，coolsnowwolf 兼容）"
+    fi
 
-    # 网络配置
-    safe_mkdir "$NETWORK_CFG_DIR"
-    local network_content
-    if $IS_DSA; then
-        log_info "配置 DSA 网络（交换机模式）"
-        LAN_IFACE="lan1 lan2"
-        WAN_IFACE="wan"
-        network_content=$(cat <<EOF
+    # 网络配置
+    safe_mkdir "$NETWORK_CFG_DIR"
+    local network_content
+    if $IS_DSA; then
+        log_info "配置 DSA 网络（交换机模式）"
+        LAN_IFACE="lan1 lan2"
+        WAN_IFACE="wan"
+        network_content=$(cat <<EOF
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
@@ -438,10 +421,10 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-        )
-    else
-        log_info "配置传统网络（eth 接口模式，coolsnowwolf 兼容）"
-        network_content=$(cat <<EOF
+        )
+    else
+        log_info "配置传统网络（eth 接口模式，coolsnowwolf 兼容）"
+        network_content=$(cat <<EOF
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
@@ -455,126 +438,156 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-        )
-    fi
-    safe_write_file "$NETWORK_CFG" "$network_content"
-    chmod +x "$NETWORK_CFG"
-    log_info "网络接口配置完成（LAN: $LAN_IFACE, WAN: $WAN_IFACE）"
+        )
+    fi
+    safe_write_file "$NETWORK_CFG" "$network_content"
+    chmod +x "$NETWORK_CFG"
+    log_info "网络接口配置完成（LAN: $LAN_IFACE, WAN: $WAN_IFACE）"
 
-    # 设备编译规则
-    if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
-        local device_rule=$(cat <<'EOF'
+    # 设备编译规则
+    if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
+        local device_rule=$(cat <<'EOF'
 
 define Device/mobipromo_cm520-79f
-  DEVICE_VENDOR := MobiPromo
-  DEVICE_MODEL := CM520-79F
-  DEVICE_DTS := qcom-ipq4019-cm520-79f
-  KERNEL_SIZE := 4096k
-  ROOTFS_SIZE := 16384k
-  IMAGE_SIZE := 81920k
-  IMAGE/trx := append-kernel | pad-to $(KERNEL_SIZE) | append-rootfs | trx -o $@
+  DEVICE_VENDOR := MobiPromo
+  DEVICE_MODEL := CM520-79F
+  DEVICE_DTS := qcom-ipq4019-cm520-79f
+  KERNEL_SIZE := 4096k
+  ROOTFS_SIZE := 16384k
+  IMAGE_SIZE := 81920k
+  IMAGE/trx := append-kernel | pad-to $(KERNEL_SIZE) | append-rootfs | trx -o $@
 endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
-        )
-        echo "$device_rule" >> "$GENERIC_MK"
-        log_success "设备编译规则添加完成"
-    else
-        sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK" 2>/dev/null || true
-        log_info "设备编译规则已存在，更新 IMAGE_SIZE"
-    fi
+        )
+        echo "$device_rule" >> "$GENERIC_MK"
+        log_success "设备编译规则添加完成"
+    else
+        sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK" 2>/dev/null || true
+        log_info "设备编译规则已存在，更新 IMAGE_SIZE"
+    fi
 }
 
 # -------------------- 配置项管理（带包存在性检查） --------------------
 add_config_if_missing() {
-    local config="$1"
-    local description="$2"
-    [ -z "$config" ] && return 0
-    
-    if [ -n "${config_cache[$config]}" ]; then
-        log_debug "配置已存在: $config"
-        return 0
-    fi
-    
-    # 对包配置项进行存在性检查
-    if [[ "$config" == CONFIG_PACKAGE_* ]]; then
-        if ! check_package_exists "$config"; then
-            return 0  # 包不存在，跳过但不报错
-        fi
-    fi
-    
-    echo "$config" >> "$CONFIG_CUSTOM"
-    config_cache["$config"]=1
-    log_info "添加配置: $config ($description)"
+    local config="$1"
+    local description="$2"
+    [ -z "$config" ] && return 0
+    
+    if [ -n "${config_cache[$config]}" ]; then
+        log_debug "配置已存在: $config"
+        return 0
+    fi
+    
+    if [[ "$config" == CONFIG_PACKAGE_* ]]; then
+        if ! check_package_exists "$config"; then
+            return 0
+        fi
+    fi
+    
+    echo "$config" >> "$CONFIG_CUSTOM"
+    config_cache["$config"]=1
+    log_info "添加配置: $config ($description)"
 }
 
 add_deps_by_layer() {
-    local layer="$1"
-    local deps_str="${DEPS[$layer]}"
-    local -a deps=()
-    read -ra deps <<< "$deps_str"
-    [ ${#deps[@]} -eq 0 ] && return 0
-    log_step "添加 [$layer] 层依赖（共 ${#deps[@]} 项）"
-    local added=0
-    for config in "${deps[@]}"; do
-        if add_config_if_missing "$config" "$layer 层依赖"; then
-            added=$((added + 1))
-        fi
-    done
-    log_info "[$layer] 层成功添加 $added 个依赖项"
+    local layer="$1"
+    local deps_str="${DEPS[$layer]}"
+    local -a deps=()
+    read -ra deps <<< "$deps_str"
+    [ ${#deps[@]} -eq 0 ] && return 0
+    log_step "添加 [$layer] 层依赖（共 ${#deps[@]} 项）"
+    local added=0
+    for config in "${deps[@]}"; do
+        if add_config_if_missing "$config" "$layer 层依赖"; then
+            added=$((added + 1))
+        fi
+    done
+    log_info "[$layer] 层成功添加 $added 个依赖项"
 }
 
 # -------------------- 插件集成函数 --------------------
 try_git_mirrors() {
-    local original_repo="$1"
-    local temp_dir="$2"
-    local mirrors=(
-        "$original_repo"
-        "https://ghproxy.com/$original_repo"
-        "https://hub.fastgit.xyz/${original_repo#*github.com/}"
-        "https://gitclone.com/github.com/${original_repo#*github.com/}"
-    )
-    
-    for mirror in "${mirrors[@]}"; do
-        for ((retry=0; retry<MAX_RETRIES; retry++)); do
-            log_info "尝试镜像（$retry）: $mirror"
-            if timeout "$GIT_CONNECT_TIMEOUT" git ls-remote --heads "$mirror" >/dev/null 2>&1; then
-                log_info "开始克隆（超时 ${GIT_CLONE_TIMEOUT}s）"
-                if timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 --single-branch "$mirror" "$temp_dir" 2>&1; then
-                    if [ -d "$temp_dir" ] && [ "$(ls -A "$temp_dir" 2>/dev/null)" != "" ]; then
-                        log_success "克隆成功（镜像: $mirror）"
-                        return 0
-                    fi
-                fi
-            fi
-            [ $retry -lt $((MAX_RETRIES - 1)) ] && sleep 5
-        done
-        [ -d "$temp_dir" ] && rm -rf "$temp_dir"
-    done
-    
-    log_error "所有镜像克隆失败: $original_repo"
-    return 1
+    local original_repo="$1"
+    local temp_dir="$2"
+    local mirrors=(
+        "$original_repo"
+        "https://ghproxy.com/$original_repo"
+        "https://hub.fastgit.xyz/${original_repo#*github.com/}"
+        "https://gitclone.com/github.com/${original_repo#*github.com/}"
+    )
+    
+    for mirror in "${mirrors[@]}"; do
+        for ((retry=0; retry<MAX_RETRIES; retry++)); do
+            log_info "尝试镜像（$retry）: $mirror"
+            if timeout "$GIT_CONNECT_TIMEOUT" git ls-remote --heads "$mirror" >/dev/null 2>&1; then
+                log_info "开始克隆（超时 ${GIT_CLONE_TIMEOUT}s）"
+                if timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 --single-branch "$mirror" "$temp_dir" 2>&1; then
+                    if [ -d "$temp_dir" ] && [ "$(ls -A "$temp_dir" 2>/dev/null)" != "" ]; then
+                        log_success "克隆成功（镜像: $mirror）"
+                        return 0
+                    fi
+                fi
+            fi
+            [ $retry -lt $((MAX_RETRIES - 1)) ] && sleep 5
+        done
+        [ -d "$temp_dir" ] && rm -rf "$temp_dir"
+    done
+    
+    log_error "所有镜像克隆失败: $original_repo"
+    return 1
 }
 
+# v6.8 MODIFIED: Rewritten to dynamically fetch the latest kernel using GitHub API
 download_clash_core() {
-    log_step "下载 OpenClash 内核（clash_meta）"
+    log_step "动态下载最新 OpenClash 内核 (clash_meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
-    local temp_core="/tmp/clash_meta_$"
-    local core_url="https://github.com/MetaCubeX/Clash.Meta/releases/latest/download/clash-meta-linux-$ARCH"
     safe_mkdir "$core_dir"
-    if ! wget --no-check-certificate -O "$temp_core" "$core_url" 2>/dev/null; then
-        log_warning "主地址下载失败，尝试镜像"
-        core_url="https://ghproxy.com/$core_url"
-        if ! wget --no-check-certificate -O "$temp_core" "$core_url" 2>/dev/null; then
+    
+    local api_url="https://api.github.com/repos/MetaCubeX/Clash.Meta/releases/latest"
+    local core_asset_name="clash-meta-linux-$ARCH.gz"
+    local temp_gz_file="/tmp/clash_meta_$$ .gz"
+    local temp_core_file="/tmp/clash_meta_$$ "
+
+    log_info "正在从 GitHub API 获取最新内核版本信息..."
+    
+    # 使用 curl 和 jq 从 API 获取下载链接
+    local download_url=$(curl -s --connect-timeout 15 "$api_url" | jq -r ".assets[] | select(.name == \"$core_asset_name\") | .browser_download_url")
+
+    if [ -z "$download_url" ]; then
+        log_warning "通过 API 获取下载链接失败，尝试使用固定链接..."
+        # Fallback to the old method if API fails
+        download_url="https://github.com/MetaCubeX/Clash.Meta/releases/latest/download/$core_asset_name"
+    else
+        local version=$(echo "$download_url" | grep -oP '(?<=/v)[\d.]+(?=/)')
+        log_info "成功获取最新版本: $version"
+    fi
+
+    log_info "开始下载内核: $download_url"
+    if ! wget --no-check-certificate -O "$temp_gz_file" "$download_url" 2>/dev/null; then
+        log_warning "主地址下载失败，尝试 ghproxy 镜像"
+        if ! wget --no-check-certificate -O "$temp_gz_file" "https://ghproxy.com/$download_url" 2>/dev/null; then
             log_warning "Clash 内核下载失败（可选）"
+            rm -f "$temp_gz_file"
             return 1
         fi
     fi
-    mv "$temp_core" "$core_dir/clash_meta" 2>/dev/null || true
-    chmod +x "$core_dir/clash_meta" 2>/dev/null || true
-    log_success "Clash 内核安装完成: $core_dir/clash_meta"
+
+    log_info "解压内核文件..."
+    if gzip -d -c "$temp_gz_file" > "$temp_core_file"; then
+        mv "$temp_core_file" "$core_dir/clash_meta"
+        chmod +x "$core_dir/clash_meta"
+        log_success "最新 Clash 内核安装完成: $core_dir/clash_meta"
+    else
+        log_error "内核解压失败！"
+        rm -f "$temp_gz_file" "$temp_core_file"
+        return 1
+    fi
+    
+    rm -f "$temp_gz_file"
     return 0
 }
+
 
 import_passwall_keys() {
     log_step "导入 Passwall2 软件源密钥"
@@ -604,7 +617,7 @@ fetch_plugin() {
     local plugin_name="$2"
     local subdir="${3:-.}"
     local deps_layer="$4"
-    local temp_dir="/tmp/${plugin_name}_$(date +%s)_$"
+    local temp_dir="/tmp/${plugin_name}_$(date +%s)_$$ "
     local lock_file="/tmp/.${plugin_name}_lock"
     
     log_step "集成插件: $plugin_name"
@@ -737,6 +750,15 @@ main() {
     init_config_cache
     setup_device_tree
     
+    # V6.8 ADDED: Force pull feeds repos to get the latest package definitions
+    log_step "强制更新 feeds 仓库"
+    for feed in feeds/*; do
+      if [ -d "$feed/.git" ]; then
+        log_info "正在更新 $feed ..."
+        (cd "$feed" && git pull)
+      fi
+    done
+
     log_step "更新与安装 feeds"
     ./scripts/feeds update -a || log_error "feeds 更新失败"
     ./scripts/feeds install -a || log_error "feeds 安装失败"
@@ -780,14 +802,11 @@ main() {
         log_info "合并自定义配置完成"
     fi
     
-    # 进行配置检查和清理
     log_info "清理无效配置项..."
     if [ -f "$CONFIG_FILE" ]; then
-        # 创建临时文件用于清理
-        local temp_config="/tmp/.config.clean_$"
+        local temp_config="/tmp/.config.clean_$$"
         cp "$CONFIG_FILE" "$temp_config"
         
-        # 移除明确已废弃的配置
         sed -i '/CONFIG_PACKAGE_kmod-nf-nathelper-extra=y/d' "$temp_config" 2>/dev/null || true
         sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' "$temp_config" 2>/dev/null || true
         sed -i '/CONFIG_PACKAGE_ipq-wifi-mobipromo/d' "$temp_config" 2>/dev/null || true
@@ -804,7 +823,7 @@ main() {
     
     log_info "配置变更摘要:"
     if [ -f "$CONFIG_FILE" ]; then
-        grep -E '^CONFIG_(TARGET_|PACKAGE_(luci-app-openclash|luci-app-passwall2|luci-app-partexp|kmod-(tun|ipt|ath10k)))' "$CONFIG_FILE" 2>/dev/null | head -20 || true
+        grep -E '^CONFIG_(TARGET_|PACKAGE_(luci-app-openclash|luci-app-passwall2|luci-app-partexp|kmod-(tun|ipt|ath10k)|xray-core|sing-box))' "$CONFIG_FILE" 2>/dev/null | head -20 || true
     fi
     
     if [ $plugin_count -gt 0 ]; then
