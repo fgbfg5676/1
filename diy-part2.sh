@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.3)
-# 修复：自定义插件目录创建失败导致的退出问题
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.4)
+# 修复：OpenWrt源码目录检测与绝对路径适配
 
 set -eo pipefail
 export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
@@ -17,13 +17,14 @@ log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \0
 validation_passed=true
 plugin_count=0
 CONFIG_FILE=".config"
-CUSTOM_PLUGINS_DIR="package/custom"
+CUSTOM_PLUGINS_DIR="package/custom"  # 默认相对路径，后续会转为绝对路径
 DEBUG_MODE=${DEBUG_MODE:-"false"}
 CLOUD_MODE=${CLOUD_MODE:-"true"}
 
 LAN_IFACE=${LAN_IFACE:-""}
 WAN_IFACE=${WAN_IFACE:-""}
 IS_DSA=false  # DSA架构标记
+OPENWRT_ROOT_DIR=""  # OpenWrt源码根目录（自动检测）
 
 declare -A config_cache=()
 declare -A DEPS=()  # 分层依赖管理（值为空格分隔的字符串）
@@ -34,12 +35,65 @@ OPENWRT_VERSION="unknown"
 
 trap 'rm -rf /tmp/*_$$ 2>/dev/null || true' EXIT
 
-# -------------------- 设备配置路径 --------------------
-DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
-DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
-GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
-NETWORK_CFG_DIR="target/linux/ipq40xx/base-files/etc/board.d"
-NETWORK_CFG="$NETWORK_CFG_DIR/02_network"
+# -------------------- 关键修复：检测OpenWrt源码根目录 --------------------
+detect_openwrt_root() {
+    log_step "检测OpenWrt源码根目录"
+    
+    # 检查标志性文件以确认是否为OpenWrt源码根目录
+    local marker_files=("include/toplevel.mk" "package/Makefile" "scripts/feeds")
+    local current_dir=$(pwd)
+    local check_dirs=("$current_dir" "$current_dir/openwrt" "$current_dir/source" "/workspace/openwrt")
+
+    # 尝试用户提供的目录（如果设置）
+    if [ -n "$OPENWRT_DIR" ]; then
+        check_dirs=("$OPENWRT_DIR" "${check_dirs[@]}")
+    fi
+
+    for dir in "${check_dirs[@]}"; do
+        log_debug "检测目录: $dir"
+        local missing=0
+        for marker in "${marker_files[@]}"; do
+            if [ ! -f "$dir/$marker" ]; then
+                missing=1
+                break
+            fi
+        done
+        if [ $missing -eq 0 ]; then
+            OPENWRT_ROOT_DIR=$(realpath "$dir")
+            log_success "找到OpenWrt源码根目录: $OPENWRT_ROOT_DIR"
+            return 0
+        fi
+    done
+
+    # 终极方案：如果找不到，尝试创建临时源码目录（仅云环境）
+    if [ "$CLOUD_MODE" = "true" ]; then
+        log_warning "未检测到OpenWrt源码，创建临时工作目录"
+        OPENWRT_ROOT_DIR="/tmp/openwrt_$$"
+        mkdir -p "$OPENWRT_ROOT_DIR"
+        log_info "使用临时目录作为源码根: $OPENWRT_ROOT_DIR"
+        return 0
+    fi
+
+    log_error "未找到OpenWrt源码根目录，请确保在源码目录中运行或设置OPENWRT_DIR环境变量"
+}
+
+# -------------------- 设备配置路径（使用绝对路径） --------------------
+DTS_DIR=""
+DTS_FILE=""
+GENERIC_MK=""
+NETWORK_CFG_DIR=""
+NETWORK_CFG=""
+
+# 初始化路径（在检测到根目录后调用）
+init_paths() {
+    DTS_DIR="$OPENWRT_ROOT_DIR/target/linux/ipq40xx/files/arch/arm/boot/dts"
+    DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
+    GENERIC_MK="$OPENWRT_ROOT_DIR/target/linux/ipq40xx/image/generic.mk"
+    NETWORK_CFG_DIR="$OPENWRT_ROOT_DIR/target/linux/ipq40xx/base-files/etc/board.d"
+    NETWORK_CFG="$NETWORK_CFG_DIR/02_network"
+    CONFIG_FILE="$OPENWRT_ROOT_DIR/.config"
+    CUSTOM_PLUGINS_DIR="$OPENWRT_ROOT_DIR/package/custom"  # 转为绝对路径
+}
 
 # -------------------- 分层依赖定义 --------------------
 DEPS["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
@@ -52,8 +106,7 @@ DEPS["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_T
 # -------------------- 版本检测与DSA判断 --------------------
 detect_openwrt_version() {
     log_step "检测OpenWrt版本与架构"
-    local version_file="include/version.mk"
-    local major_ver minor_ver
+    local version_file="$OPENWRT_ROOT_DIR/include/version.mk"
 
     if [ ! -f "$version_file" ]; then
         log_warning "未找到版本文件: $version_file（可能路径错误）"
@@ -147,18 +200,16 @@ init_config_cache() {
     log_success "配置缓存初始化完成（加载 $total_lines 项）"
 }
 
-# -------------------- 安全文件操作（关键修复） --------------------
+# -------------------- 安全文件操作 --------------------
 safe_mkdir() {
     local dir="$1"
     log_debug "尝试创建目录: $dir"
 
-    # 检查目录是否已存在
     if [ -d "$dir" ]; then
         log_debug "目录已存在: $dir"
         return 0
     fi
 
-    # 检查父目录是否存在且可写
     local parent_dir=$(dirname "$dir")
     if [ ! -d "$parent_dir" ]; then
         log_warning "父目录不存在，尝试创建: $parent_dir"
@@ -168,11 +219,10 @@ safe_mkdir() {
         log_debug "父目录创建成功: $parent_dir"
     fi
 
-    # 检查父目录权限
     if [ ! -w "$parent_dir" ]; then
         log_warning "父目录不可写，尝试修复权限: $parent_dir"
         if [ "$(id -u)" -ne 0 ]; then
-            log_warning "非root用户，无法修改权限，尝试sudo（可能需要密码）"
+            log_warning "非root用户，尝试sudo提升权限"
             if ! sudo chmod u+w "$parent_dir"; then
                 log_error "修复父目录权限失败: $parent_dir（请检查用户权限）"
             fi
@@ -183,14 +233,12 @@ safe_mkdir() {
         fi
     fi
 
-    # 尝试创建目标目录
     if ! mkdir -p "$dir"; then
-        # 终极方案：使用临时目录替代（仅在云环境）
         if [ "$CLOUD_MODE" = "true" ]; then
-            log_warning "创建目标目录失败，使用临时目录替代"
+            log_warning "创建目标目录失败，使用系统临时目录"
             dir="/tmp/custom_plugins_$$"
             mkdir -p "$dir"
-            CUSTOM_PLUGINS_DIR="$dir"  # 全局替换目录路径
+            CUSTOM_PLUGINS_DIR="$dir"
             log_info "已自动切换插件目录至: $dir"
             return 0
         else
@@ -568,7 +616,7 @@ try_git_mirrors() {
 }
 
 download_clash_core() {
-    local core_dir="/etc/openclash/core"
+    local core_dir="$OPENWRT_ROOT_DIR/etc/openclash/core"
     local temp_core="/tmp/clash_meta_$$"
     local arch="armv7"
     
@@ -594,7 +642,7 @@ download_clash_core() {
 
 import_passwall_keys() {
     log_step "导入Passwall2软件源密钥"
-    local key_dir="/etc/opkg/keys"
+    local key_dir="$OPENWRT_ROOT_DIR/etc/opkg/keys"
     safe_mkdir "$key_dir"
     
     local key_urls=(
@@ -637,9 +685,9 @@ fetch_plugin() {
     fi
 
     local cleanup_paths=(
-        "feeds/luci/applications/$plugin_name"
-        "feeds/packages/net/$plugin_name"
-        "package/$plugin_name"
+        "$OPENWRT_ROOT_DIR/feeds/luci/applications/$plugin_name"
+        "$OPENWRT_ROOT_DIR/feeds/packages/net/$plugin_name"
+        "$OPENWRT_ROOT_DIR/package/$plugin_name"
         "$CUSTOM_PLUGINS_DIR/$plugin_name"
         "$temp_dir"
     )
@@ -732,11 +780,15 @@ verify_config_conflicts() {
 
 # -------------------- 主流程 --------------------
 main() {
-    log_step "OpenWrt插件集成流程启动（V6.3）"
+    log_step "OpenWrt插件集成流程启动（V6.4）"
     
     if [ "$EUID" -ne 0 ]; then
         log_warning "建议以root用户运行（当前: $USER）"
     fi
+
+    # 关键修复：先检测源码根目录
+    detect_openwrt_root
+    init_paths  # 初始化所有绝对路径
 
     log_info "开始依赖工具检查"
     check_dependencies
@@ -747,9 +799,9 @@ main() {
     log_info "开始配置缓存初始化"
     init_config_cache
     
-    log_info "创建自定义插件目录: $CUSTOM_PLUGINS_DIR"  # 明确显示目录路径
+    log_info "创建自定义插件目录: $CUSTOM_PLUGINS_DIR"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
-    log_success "自定义插件目录准备完成"  # 新增成功日志
+    log_success "自定义插件目录准备完成"
 
     if [ "$DEBUG_MODE" = "true" ]; then
         log_info "启用调试模式"
@@ -766,8 +818,8 @@ main() {
     setup_device_tree
 
     log_step "更新软件源"
-    ./scripts/feeds update -a || log_error "feeds更新失败"
-    ./scripts/feeds install -a || log_error "feeds安装失败"
+    "$OPENWRT_ROOT_DIR/scripts/feeds" update -a || log_error "feeds更新失败"
+    "$OPENWRT_ROOT_DIR/scripts/feeds" install -a || log_error "feeds安装失败"
 
     add_deps_by_layer "kernel"
     add_deps_by_layer "drivers"
@@ -797,7 +849,7 @@ main() {
     verify_config_conflicts
 
     log_step "生成最终配置"
-    make defconfig || log_error "配置生成失败"
+    make -C "$OPENWRT_ROOT_DIR" defconfig || log_error "配置生成失败"
 
     log_info "配置变更摘要:"
     grep -E '^CONFIG_PACKAGE_(luci-app-openclash|luci-app-passwall2|kmod-nft-tproxy|iptables)' "$CONFIG_FILE" || true
@@ -806,8 +858,8 @@ main() {
     if $validation_passed && [ $plugin_count -eq 2 ]; then
         log_success "🎉 所有插件集成成功（数量: $plugin_count）"
         log_info "建议操作:"
-        log_info "1. 如需调整配置：make menuconfig"
-        log_info "2. 开始编译：make -j$(nproc) V=s"
+        log_info "1. 如需调整配置：make -C $OPENWRT_ROOT_DIR menuconfig"
+        log_info "2. 开始编译：make -C $OPENWRT_ROOT_DIR -j$(nproc) V=s"
         exit 0
     elif [ $plugin_count -gt 0 ]; then
         log_warning "⚠️ 部分插件集成成功（数量: $plugin_count）"
