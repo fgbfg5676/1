@@ -1,12 +1,11 @@
 #!/bin/bash
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.1)
-# 修复：版本检测失败导致的脚本退出问题
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V6.2)
+# 修复：配置缓存初始化失败导致的脚本退出
 
 set -eo pipefail
 export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
 
 # -------------------- 日志函数 --------------------
-# （保持不变）
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }
 log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; exit 1; }
@@ -15,7 +14,6 @@ log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-# （保持不变）
 validation_passed=true
 plugin_count=0
 CONFIG_FILE=".config"
@@ -37,7 +35,6 @@ OPENWRT_VERSION="unknown"
 trap 'rm -rf /tmp/*_$$ 2>/dev/null || true' EXIT
 
 # -------------------- 设备配置路径 --------------------
-# （保持不变）
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
 DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
 GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
@@ -45,7 +42,6 @@ NETWORK_CFG_DIR="target/linux/ipq40xx/base-files/etc/board.d"
 NETWORK_CFG="$NETWORK_CFG_DIR/02_network"
 
 # -------------------- 分层依赖定义 --------------------
-# （保持不变）
 DEPS["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
 DEPS["drivers"]="CONFIG_PACKAGE_kmod-qca-nss-dp=y CONFIG_PACKAGE_kmod-qca-ssdk=y CONFIG_PACKAGE_kmod-mii=y CONFIG_PACKAGE_kmod-phy-qcom-ipq4019=y CONFIG_PACKAGE_kmod-of-mdio=y CONFIG_PACKAGE_kmod-mdio-gpio=y CONFIG_PACKAGE_kmod-fixed-phy=y CONFIG_PACKAGE_kmod-ath10k-ct=y CONFIG_PACKAGE_ath10k-firmware-qca4019-ct=y CONFIG_PACKAGE_ipq-wifi-mobipromo_cm520-79f=y CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y"
 DEPS["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
@@ -53,24 +49,21 @@ DEPS["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_luci-app-o
 DEPS["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y"
 DEPS["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y"
 
-# -------------------- 版本检测与DSA判断（关键修复） --------------------
+# -------------------- 版本检测与DSA判断 --------------------
 detect_openwrt_version() {
-    log_step "检测OpenWrt版本与架构"  # 增加日志，确认函数执行
+    log_step "检测OpenWrt版本与架构"
     local version_file="include/version.mk"
     local major_ver minor_ver
 
-    # 检查版本文件是否存在
     if [ ! -f "$version_file" ]; then
         log_warning "未找到版本文件: $version_file（可能路径错误）"
         log_info "强制使用DSA兼容模式"
         IS_DSA=true
-        return  # 不退出，继续执行
+        return
     fi
 
-    # 读取版本号（关键修复：允许grep失败，避免管道导致脚本退出）
     OPENWRT_VERSION=$(grep '^OPENWRT_VERSION=' "$version_file" | cut -d= -f2 | tr -d ' "' || true)
     
-    # 处理版本号为空的情况
     if [ -z "$OPENWRT_VERSION" ]; then
         log_warning "无法从 $version_file 中提取版本号"
         log_info "默认使用DSA架构兼容模式"
@@ -78,10 +71,8 @@ detect_openwrt_version() {
         return
     fi
 
-    # 正常版本处理
     log_info "检测到 OpenWrt 版本: $OPENWRT_VERSION"
     
-    # 判断DSA架构
     if [[ "$OPENWRT_VERSION" =~ ^22\.03 || "$OPENWRT_VERSION" =~ ^23\.05 || "$OPENWRT_VERSION" =~ ^24\.10 || "$OPENWRT_VERSION" == "snapshot" ]]; then
         IS_DSA=true
         log_info "检测到 DSA 架构（22.03+）"
@@ -90,7 +81,6 @@ detect_openwrt_version() {
         log_info "使用传统网络架构"
     fi
 
-    # 版本适配（保持不变）
     if [[ "$OPENWRT_VERSION" =~ ^24\.10 || "$OPENWRT_VERSION" == "snapshot" ]]; then
         log_info "版本 24.10+ 启用 nft-tproxy 支持"
         DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
@@ -102,9 +92,8 @@ detect_openwrt_version() {
     fi
 }
 
-# -------------------- 其他函数（保持不变） --------------------
+# -------------------- 依赖工具检查 --------------------
 check_dependencies() {
-    # （原逻辑不变）
     local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" 
                  "mkdir" "touch" "wc" "awk" "unzip" "xsltproc" "gettext" "dtc" "make" "gcc")
     local missing=()
@@ -128,19 +117,43 @@ check_dependencies() {
     fi
 }
 
+# -------------------- 配置缓存管理（关键修复） --------------------
 init_config_cache() {
-    # （原逻辑不变）
-    if [ -f "$CONFIG_FILE" ]; then
-        log_debug "加载配置缓存（行数: $(wc -l < "$CONFIG_FILE")）"
-        while IFS= read -r line; do
-            [[ "$line" =~ ^# || -z "$line" ]] && continue
-            config_cache["$line"]=1
-        done < "$CONFIG_FILE"
+    log_step "初始化配置缓存"  # 增加步骤日志
+    
+    # 检查文件是否存在且可读
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_info "配置文件不存在，缓存为空"
+        return 0
     fi
+    
+    if [ ! -r "$CONFIG_FILE" ]; then
+        log_warning "配置文件不可读，跳过缓存初始化"
+        return 0  # 仅警告，不退出
+    fi
+
+    # 统计配置项数量（用于日志）
+    local total_lines=$(grep -v -E '^#|^$' "$CONFIG_FILE" | wc -l)
+    log_info "发现 $total_lines 个有效配置项，开始加载缓存"
+
+    # 读取配置文件（关键修复：使用while循环安全读取，允许单行失败）
+    local line_num=0
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+        # 跳过注释和空行
+        [[ "$line" =~ ^# || -z "$line" ]] && continue
+        
+        # 尝试添加到缓存（捕获可能的错误）
+        if ! config_cache["$line"]=1; then
+            log_warning "配置项格式异常（行 $line_num）: $line（已跳过）"
+        fi
+    done < "$CONFIG_FILE"
+
+    log_success "配置缓存初始化完成（加载 $total_lines 项）"
 }
 
+# -------------------- 安全文件操作 --------------------
 safe_mkdir() {
-    # （原逻辑不变）
     local dir="$1"
     [ -d "$dir" ] && return 0
     if ! mkdir -p "$dir"; then
@@ -150,7 +163,6 @@ safe_mkdir() {
 }
 
 safe_write_file() {
-    # （原逻辑不变）
     local file="$1"
     local content="$2"
     safe_mkdir "$(dirname "$file")"
@@ -160,8 +172,8 @@ safe_write_file() {
     log_debug "写入文件: $file"
 }
 
+# -------------------- 设备树与网络配置 --------------------
 setup_device_tree() {
-    # （原逻辑不变）
     log_step "配置CM520-79F设备树与网络"
     
     if [ -f "$DTS_FILE" ]; then
@@ -441,8 +453,8 @@ EOF
     fi
 }
 
+# -------------------- 配置项管理 --------------------
 add_config_if_missing() {
-    # （原逻辑不变）
     local config="$1"
     local description="$2"
     
@@ -468,7 +480,6 @@ add_config_if_missing() {
 }
 
 add_deps_by_layer() {
-    # （原逻辑不变）
     local layer="$1"
     local deps_str="${DEPS[$layer]}"
     local -a deps=()
@@ -483,8 +494,8 @@ add_deps_by_layer() {
     done
 }
 
+# -------------------- 插件集成 --------------------
 try_git_mirrors() {
-    # （原逻辑不变）
     local original_repo="$1"
     local temp_dir="$2"
     local mirrors=(
@@ -517,7 +528,6 @@ try_git_mirrors() {
 }
 
 download_clash_core() {
-    # （原逻辑不变）
     local core_dir="/etc/openclash/core"
     local temp_core="/tmp/clash_meta_$$"
     local arch="armv7"
@@ -543,7 +553,6 @@ download_clash_core() {
 }
 
 import_passwall_keys() {
-    # （原逻辑不变）
     log_step "导入Passwall2软件源密钥"
     local key_dir="/etc/opkg/keys"
     safe_mkdir "$key_dir"
@@ -569,7 +578,6 @@ import_passwall_keys() {
 }
 
 fetch_plugin() {
-    # （原逻辑不变）
     local repo="$1"
     local plugin_name="$2"
     local subdir="${3:-.}"
@@ -642,8 +650,8 @@ fetch_plugin() {
     return 0
 }
 
+# -------------------- 验证机制 --------------------
 verify_filesystem() {
-    # （原逻辑不变）
     local plugin=$1
     log_step "验证 $plugin 文件系统"
     
@@ -659,7 +667,6 @@ verify_filesystem() {
 }
 
 verify_config_conflicts() {
-    # （原逻辑不变）
     log_step "检查配置冲突"
     local conflicts=(
         "CONFIG_PACKAGE_dnsmasq CONFIG_PACKAGE_dnsmasq-full"
@@ -685,21 +692,20 @@ verify_config_conflicts() {
 
 # -------------------- 主流程 --------------------
 main() {
-    log_step "OpenWrt插件集成流程启动（V6.1）"
+    log_step "OpenWrt插件集成流程启动（V6.2）"
     
     if [ "$EUID" -ne 0 ]; then
         log_warning "建议以root用户运行（当前: $USER）"
     fi
 
-    # 初始化检查（按顺序执行，增加日志定位）
     log_info "开始依赖工具检查"
     check_dependencies
     
-    log_info "开始版本与架构检测"  # 新增日志，确认执行到此处
+    log_info "开始版本与架构检测"
     detect_openwrt_version
     
     log_info "开始配置缓存初始化"
-    init_config_cache
+    init_config_cache  # 调用修复后的函数
     
     log_info "创建自定义插件目录"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
