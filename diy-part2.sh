@@ -91,7 +91,7 @@ check_environment() {
     if [ "$EUID" -ne 0 ]; then
         log_warning "建议以 root 用户运行（当前: $USER）。执行: chown -R $(id -u):$(id -g) ."
     fi
-    log_success "环境检查通过 (coolsnowwolf/lede master 兼容)"
+    log_success "环境检查通过 (coolsnowwolf/lede 兼容)"
 }
 
 # -------------------- 依赖工具检查 --------------------
@@ -118,105 +118,103 @@ check_dependencies() {
     log_success "依赖工具检查通过"
 }
 
-# ... (detect_openwrt_version, init_config_cache, safe_mkdir, safe_write_file, setup_device_tree, add_config_if_missing, add_deps_by_layer, try_git_mirrors 函数与原版相同，此处省略以节省篇幅) ...
-# NOTE: The user is expected to copy the whole script, so I will include the unchanged parts for completeness.
 # -------------------- 版本检测与 DSA 判断 --------------------
 detect_openwrt_version() {
-    log_step "检测 OpenWrt/LEDE 版本与架构"
-    local version_file="include/version.mk"
-    
-    if [ -d ".git" ]; then
-        local git_ver=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || git rev-parse --abbrev-ref HEAD | sed 's/lede-//' || echo "master")
-        if [[ "$git_ver" =~ ([0-9]{4})([0-9]{2})([0-9]{2}) ]]; then
-            OPENWRT_VERSION="21.02"
-            log_info "日期格式或 master 分支，假设为 $OPENWRT_VERSION (legacy 模式)"
-        else
-            OPENWRT_VERSION="$git_ver"
-        fi
-        log_info "从 Git 提取版本: $OPENWRT_VERSION (coolsnowwolf/lede)"
-    elif [ -f "$version_file" ]; then
-        OPENWRT_VERSION=$(grep '^OPENWRT_VERSION=' "$version_file" | cut -d= -f2 | tr -d ' "' || echo "master")
-        log_info "从 version.mk 提取版本: $OPENWRT_VERSION"
-    else
-        log_warning "未找到版本文件或 Git 仓库，假设 master (legacy)"
-        OPENWRT_VERSION="master"
-    fi
-    
-    # DSA 判断
-    if [[ "$OPENWRT_VERSION" =~ ^(23\.05|24\.10|snapshot) ]]; then
-        IS_DSA=true
-        log_info "检测到 DSA 架构（23.05+）"
-        DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
-        DEPS["openclash"]+=" CONFIG_PACKAGE_kmod-nft-tproxy=y"
-    else
-        IS_DSA=false
-        log_info "使用传统网络架构 (swconfig, 兼容 coolsnowwolf/lede)"
-        DEPS["network"]+=" CONFIG_PACKAGE_iptables-mod-nat-extra=y CONFIG_PACKAGE_kmod-ipt-offload=y"
-        DEPS["passwall2"]+=" CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
-    fi
-    
-    # 清理冲突 WiFi 配置
-    if [ -f "$CONFIG_FILE" ] && grep -q "kmod-ath10k-ct\|ath10k-firmware-qca4019-ct" "$CONFIG_FILE"; then
-        log_warning "检测到 CT WiFi 配置，移除以使用标准版"
-        sed -i '/kmod-ath10k-ct\|ath10k-firmware-qca4019-ct/d' "$CONFIG_FILE"
-    fi
-    log_success "版本检测完成 (legacy 优先)"
+    log_step "检测 OpenWrt/LEDE 版本与架构"
+    local version_file="include/version.mk"
+    
+    if [ -d ".git" ]; then
+        local git_ver=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || git rev-parse --abbrev-ref HEAD | sed 's/lede-//' || echo "master")
+        if [[ "$git_ver" =~ ([0-9]{4})([0-9]{2})([0-9]{2}) ]]; then
+            OPENWRT_VERSION="21.02"
+            log_info "日期格式或 master 分支，假设为 $OPENWRT_VERSION (legacy 模式)"
+        else
+            OPENWRT_VERSION="$git_ver"
+        fi
+        log_info "从 Git 提取版本: $OPENWRT_VERSION (coolsnowwolf/lede)"
+    elif [ -f "$version_file" ]; then
+        OPENWRT_VERSION=$(grep '^OPENWRT_VERSION=' "$version_file" | cut -d= -f2 | tr -d ' "' || echo "master")
+        log_info "从 version.mk 提取版本: $OPENWRT_VERSION"
+    else
+        log_warning "未找到版本文件或 Git 仓库，假设 master (legacy)"
+        OPENWRT_VERSION="master"
+    fi
+    
+    # DSA 判断
+    if [[ "$OPENWRT_VERSION" =~ ^(23\.05|24\.10|snapshot) ]]; then
+        IS_DSA=true
+        log_info "检测到 DSA 架构（23.05+）"
+        DEPS["network"]+=" CONFIG_PACKAGE_kmod-nft-nat=y CONFIG_PACKAGE_kmod-nft-tproxy=y"
+        DEPS["openclash"]+=" CONFIG_PACKAGE_kmod-nft-tproxy=y"
+    else
+        IS_DSA=false
+        log_info "使用传统网络架构 (swconfig, 兼容 coolsnowwolf/lede)"
+        DEPS["network"]+=" CONFIG_PACKAGE_iptables-mod-nat-extra=y CONFIG_PACKAGE_kmod-ipt-offload=y"
+        DEPS["passwall2"]+=" CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
+    fi
+    
+    # 清理冲突 WiFi 配置
+    if [ -f "$CONFIG_FILE" ] && grep -q "kmod-ath10k-ct\|ath10k-firmware-qca4019-ct" "$CONFIG_FILE"; then
+        log_warning "检测到 CT WiFi 配置，移除以使用标准版"
+        sed -i '/kmod-ath10k-ct\|ath10k-firmware-qca4019-ct/d' "$CONFIG_FILE"
+    fi
+    log_success "版本检测完成 (legacy 优先)"
 }
 
 # -------------------- 配置缓存管理 --------------------
 init_config_cache() {
-    log_step "初始化配置缓存"
-    if [ ! -f "$CONFIG_FILE" ]; then
-        log_info "配置文件不存在，创建空文件"
-        touch "$CONFIG_FILE"
-        return 0
-    fi
-    if [ ! -r "$CONFIG_FILE" ]; then
-        log_warning "配置文件不可读，跳过缓存"
-        return 0
-    fi
-    local total_lines=$(grep -v -E '^#|^$' "$CONFIG_FILE" | wc -l)
-    log_info "发现 $total_lines 个有效配置项，开始加载缓存"
-    while IFS= read -r line; do
-        [[ "$line" =~ ^# || -z "$line" ]] && continue
-        config_cache["$line"]=1
-    done < "$CONFIG_FILE"
-    log_success "配置缓存初始化完成（加载 $total_lines 项）"
+    log_step "初始化配置缓存"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_info "配置文件不存在，创建空文件"
+        touch "$CONFIG_FILE"
+        return 0
+    fi
+    if [ ! -r "$CONFIG_FILE" ]; then
+        log_warning "配置文件不可读，跳过缓存"
+        return 0
+    fi
+    local total_lines=$(grep -v -E '^#|^$' "$CONFIG_FILE" | wc -l)
+    log_info "发现 $total_lines 个有效配置项，开始加载缓存"
+    while IFS= read -r line; do
+        [[ "$line" =~ ^# || -z "$line" ]] && continue
+        config_cache["$line"]=1
+    done < "$CONFIG_FILE"
+    log_success "配置缓存初始化完成（加载 $total_lines 项）"
 }
 
 # -------------------- 安全文件操作 --------------------
 safe_mkdir() {
-    local dir="$1"
-    [ -d "$dir" ] && return 0
-    if ! mkdir -p "$dir"; then
-        log_error "无法创建目录: $dir（权限问题）"
-    fi
-    log_info "创建目录: $dir"
+    local dir="$1"
+    [ -d "$dir" ] && return 0
+    if ! mkdir -p "$dir"; then
+        log_error "无法创建目录: $dir（权限问题）"
+    fi
+    log_info "创建目录: $dir"
 }
 
 safe_write_file() {
-    local file="$1"
-    local content="$2"
-    safe_mkdir "$(dirname "$file")"
-    if ! echo "$content" > "$file"; then
-        log_error "无法写入文件: $file"
-    fi
-    log_info "写入文件: $file"
+    local file="$1"
+    local content="$2"
+    safe_mkdir "$(dirname "$file")"
+    if ! echo "$content" > "$file"; then
+        log_error "无法写入文件: $file"
+    fi
+    log_info "写入文件: $file"
 }
 
 # -------------------- 设备树与网络配置（DTS 保护） --------------------
 setup_device_tree() {
-    log_step "配置 CM520-79F 设备树与网络"
-    safe_mkdir "$DTS_DIR"
-    
-    if [ -f "$DTS_FILE" ] && [ -s "$DTS_FILE" ]; then
-        if [ ! -f "${DTS_FILE}.bak" ]; then
-            cp "$DTS_FILE" "${DTS_FILE}.bak"
-            log_info "备份自定义 DTS 至 ${DTS_FILE}.bak"
-        fi
-        log_success "检测到自定义 DTS，跳过覆盖，保留现有文件"
-    else
-        local dts_content=$(cat <<'EOF'
+    log_step "配置 CM520-79F 设备树与网络"
+    safe_mkdir "$DTS_DIR"
+    
+    if [ -f "$DTS_FILE" ] && [ -s "$DTS_FILE" ]; then
+        if [ ! -f "${DTS_FILE}.bak" ]; then
+            cp "$DTS_FILE" "${DTS_FILE}.bak"
+            log_info "备份自定义 DTS 至 ${DTS_FILE}.bak"
+        fi
+        log_success "检测到自定义 DTS，跳过覆盖，保留现有文件"
+    else
+        local dts_content=$(cat <<'EOF'
 /dts-v1/;
 /* SPDX-License-Identifier: GPL-2.0-or-later OR MIT */
 #include "qcom-ipq4019.dtsi"
@@ -392,19 +390,19 @@ setup_device_tree() {
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 &wifi1 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_5000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
 EOF
-        )
-        safe_write_file "$DTS_FILE" "$dts_content"
-        log_success "DTS 文件写入完成（默认内容，coolsnowwolf 兼容）"
-    fi
+        )
+        safe_write_file "$DTS_FILE" "$dts_content"
+        log_success "DTS 文件写入完成（默认内容，coolsnowwolf 兼容）"
+    fi
 
-    # 网络配置
-    safe_mkdir "$NETWORK_CFG_DIR"
-    local network_content
-    if $IS_DSA; then
-        log_info "配置 DSA 网络（交换机模式）"
-        LAN_IFACE="lan1 lan2"
-        WAN_IFACE="wan"
-        network_content=$(cat <<EOF
+    # 网络配置
+    safe_mkdir "$NETWORK_CFG_DIR"
+    local network_content
+    if $IS_DSA; then
+        log_info "配置 DSA 网络（交换机模式）"
+        LAN_IFACE="lan1 lan2"
+        WAN_IFACE="wan"
+        network_content=$(cat <<EOF
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
@@ -421,10 +419,10 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-        )
-    else
-        log_info "配置传统网络（eth 接口模式，coolsnowwolf 兼容）"
-        network_content=$(cat <<EOF
+        )
+    else
+        log_info "配置传统网络（eth 接口模式，coolsnowwolf 兼容）"
+        network_content=$(cat <<EOF
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
@@ -438,104 +436,104 @@ ipq40xx_board_detect() {
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
-        )
-    fi
-    safe_write_file "$NETWORK_CFG" "$network_content"
-    chmod +x "$NETWORK_CFG"
-    log_info "网络接口配置完成（LAN: $LAN_IFACE, WAN: $WAN_IFACE）"
+        )
+    fi
+    safe_write_file "$NETWORK_CFG" "$network_content"
+    chmod +x "$NETWORK_CFG"
+    log_info "网络接口配置完成（LAN: $LAN_IFACE, WAN: $WAN_IFACE）"
 
-    # 设备编译规则
-    if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
-        local device_rule=$(cat <<'EOF'
+    # 设备编译规则
+    if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
+        local device_rule=$(cat <<'EOF'
 
 define Device/mobipromo_cm520-79f
-  DEVICE_VENDOR := MobiPromo
-  DEVICE_MODEL := CM520-79F
-  DEVICE_DTS := qcom-ipq4019-cm520-79f
-  KERNEL_SIZE := 4096k
-  ROOTFS_SIZE := 16384k
-  IMAGE_SIZE := 81920k
-  IMAGE/trx := append-kernel | pad-to $(KERNEL_SIZE) | append-rootfs | trx -o $@
+    DEVICE_VENDOR := MobiPromo
+    DEVICE_MODEL := CM520-79F
+    DEVICE_DTS := qcom-ipq4019-cm520-79f
+    KERNEL_SIZE := 4096k
+    ROOTFS_SIZE := 16384k
+    IMAGE_SIZE := 81920k
+    IMAGE/trx := append-kernel | pad-to $(KERNEL_SIZE) | append-rootfs | trx -o $@
 endef
 TARGET_DEVICES += mobipromo_cm520-79f
 EOF
-        )
-        echo "$device_rule" >> "$GENERIC_MK"
-        log_success "设备编译规则添加完成"
-    else
-        sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK" 2>/dev/null || true
-        log_info "设备编译规则已存在，更新 IMAGE_SIZE"
-    fi
+        )
+        echo "$device_rule" >> "$GENERIC_MK"
+        log_success "设备编译规则添加完成"
+    else
+        sed -i 's/IMAGE_SIZE := 32768k/IMAGE_SIZE := 81920k/' "$GENERIC_MK" 2>/dev/null || true
+        log_info "设备编译规则已存在，更新 IMAGE_SIZE"
+    fi
 }
 
 # -------------------- 配置项管理（带包存在性检查） --------------------
 add_config_if_missing() {
-    local config="$1"
-    local description="$2"
-    [ -z "$config" ] && return 0
-    
-    if [ -n "${config_cache[$config]}" ]; then
-        log_debug "配置已存在: $config"
-        return 0
-    fi
-    
-    if [[ "$config" == CONFIG_PACKAGE_* ]]; then
-        if ! check_package_exists "$config"; then
-            return 0
-        fi
-    fi
-    
-    echo "$config" >> "$CONFIG_CUSTOM"
-    config_cache["$config"]=1
-    log_info "添加配置: $config ($description)"
+    local config="$1"
+    local description="$2"
+    [ -z "$config" ] && return 0
+    
+    if [ -n "${config_cache[$config]}" ]; then
+        log_debug "配置已存在: $config"
+        return 0
+    fi
+    
+    if [[ "$config" == CONFIG_PACKAGE_* ]]; then
+        if ! check_package_exists "$config"; then
+            return 0
+        fi
+    fi
+    
+    echo "$config" >> "$CONFIG_CUSTOM"
+    config_cache["$config"]=1
+    log_info "添加配置: $config ($description)"
 }
 
 add_deps_by_layer() {
-    local layer="$1"
-    local deps_str="${DEPS[$layer]}"
-    local -a deps=()
-    read -ra deps <<< "$deps_str"
-    [ ${#deps[@]} -eq 0 ] && return 0
-    log_step "添加 [$layer] 层依赖（共 ${#deps[@]} 项）"
-    local added=0
-    for config in "${deps[@]}"; do
-        if add_config_if_missing "$config" "$layer 层依赖"; then
-            added=$((added + 1))
-        fi
-    done
-    log_info "[$layer] 层成功添加 $added 个依赖项"
+    local layer="$1"
+    local deps_str="${DEPS[$layer]}"
+    local -a deps=()
+    read -ra deps <<< "$deps_str"
+    [ ${#deps[@]} -eq 0 ] && return 0
+    log_step "添加 [$layer] 层依赖（共 ${#deps[@]} 项）"
+    local added=0
+    for config in "${deps[@]}"; do
+        if add_config_if_missing "$config" "$layer 层依赖"; then
+            added=$((added + 1))
+        fi
+    done
+    log_info "[$layer] 层成功添加 $added 个依赖项"
 }
 
 # -------------------- 插件集成函数 --------------------
 try_git_mirrors() {
-    local original_repo="$1"
-    local temp_dir="$2"
-    local mirrors=(
-        "$original_repo"
-        "https://ghproxy.com/$original_repo"
-        "https://hub.fastgit.xyz/${original_repo#*github.com/}"
-        "https://gitclone.com/github.com/${original_repo#*github.com/}"
-    )
-    
-    for mirror in "${mirrors[@]}"; do
-        for ((retry=0; retry<MAX_RETRIES; retry++)); do
-            log_info "尝试镜像（$retry）: $mirror"
-            if timeout "$GIT_CONNECT_TIMEOUT" git ls-remote --heads "$mirror" >/dev/null 2>&1; then
-                log_info "开始克隆（超时 ${GIT_CLONE_TIMEOUT}s）"
-                if timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 --single-branch "$mirror" "$temp_dir" 2>&1; then
-                    if [ -d "$temp_dir" ] && [ "$(ls -A "$temp_dir" 2>/dev/null)" != "" ]; then
-                        log_success "克隆成功（镜像: $mirror）"
-                        return 0
-                    fi
-                fi
-            fi
-            [ $retry -lt $((MAX_RETRIES - 1)) ] && sleep 5
-        done
-        [ -d "$temp_dir" ] && rm -rf "$temp_dir"
-    done
-    
-    log_error "所有镜像克隆失败: $original_repo"
-    return 1
+    local original_repo="$1"
+    local temp_dir="$2"
+    local mirrors=(
+        "$original_repo"
+        "https://ghproxy.com/$original_repo"
+        "https://hub.fastgit.xyz/${original_repo#*github.com/}"
+        "https://gitclone.com/github.com/${original_repo#*github.com/}"
+    )
+    
+    for mirror in "${mirrors[@]}"; do
+        for ((retry=0; retry<MAX_RETRIES; retry++)); do
+            log_info "尝试镜像（$retry）: $mirror"
+            if timeout "$GIT_CONNECT_TIMEOUT" git ls-remote --heads "$mirror" >/dev/null 2>&1; then
+                log_info "开始克隆（超时 ${GIT_CLONE_TIMEOUT}s）"
+                if timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 --single-branch "$mirror" "$temp_dir" 2>&1; then
+                    if [ -d "$temp_dir" ] && [ "$(ls -A "$temp_dir" 2>/dev/null)" != "" ]; then
+                        log_success "克隆成功（镜像: $mirror）"
+                        return 0
+                    fi
+                fi
+            fi
+            [ $retry -lt $((MAX_RETRIES - 1)) ] && sleep 5
+        done
+        [ -d "$temp_dir" ] && rm -rf "$temp_dir"
+    done
+    
+    log_error "所有镜像克隆失败: $original_repo"
+    return 1
 }
 
 # v6.8 MODIFIED: Rewritten to dynamically fetch the latest kernel using GitHub API
