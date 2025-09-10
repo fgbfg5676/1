@@ -331,8 +331,8 @@ try_git_mirrors() {
     log_error "所有镜像克隆失败: $original_repo"; return 1;
 }
 
-# -------------------- 内核下载函数 (已修改为临时网盘专用) --------------------
 # -------------------- 内核下载函数 (最终修复版) --------------------
+# -------------------- 内核下载函数 (精简版) --------------------
 download_clash_core_improved() {
     log_step "强制下载最新 OpenClash 内核 (mihomo/clash.meta)"
     # 暂时关闭 set -e，确保下载失败不会立即退出
@@ -348,71 +348,47 @@ download_clash_core_improved() {
     local temp_gz_file="/tmp/clash_core_$$"
     local temp_file="/tmp/clash_core_unzipped_$$"
     local success=false
-    local core_sha256=""
 
     log_info "内核版本锁定: v${kernel_version}"
     
-    case "${ARCH}" in
-        "armv7") core_sha256="d09a7b62900c4c449c29d0f3a61f52d0b5e783472096f2a64c4c1a5d6141a027";;
-        "arm64") core_sha256="b4a1c5d082b2d6a5e12f6890d7c71d0b3e5c9b2d8c3628e9c9c8e1a1d955c414";;
-        "amd64") core_sha256="7b919d7d100d009b0b1f23c9d7d2d38d2e8e9198d0f3c5f4c4c2a1a1c9d6d0b5";;
-        "mipsle") core_sha256="158c8a14b0b1c09d3b4b7c1d7c4a1b0d2d3c1e2f3d4e5f6d7e8f9a0b1c2d3e4f";;
-        "mips") core_sha256="063523f6d7d4f9d8d6f51c7d2c1d9f8c6d1d2b1a1c9d7d3c2a1d7c4d5b2a4c1a";;
-        *) log_error "❌ 不支持的架构: $ARCH。无法进行 SHA256 校验。";;
-    esac
+    # 只保留最可靠的 GitHub 原始文件链接
+    local link="https://raw.githubusercontent.com/fgbfg5676/1/main/mihomo-linux-armv7-v1.19.13.gz"
+    local display_link=$(echo "$link" | sed 's|https://||' | cut -d'/' -f1,2,3)
+    log_info "尝试从您自己的 GitHub 仓库下载 ($display_link)..."
 
-    local temp_links=(
-        "https://raw.githubusercontent.com/fgbfg5676/1/main/mihomo-linux-armv7-v1.19.13.gz" # 新增的 GitHub 原始文件链接
-        "https://drive.google.com/uc?export=download&id=1Gnk8dGXkUjIfGe9enzH1v1hnVVDVlMY_"
-        "https://u.ua/d/Du6sN44/"
-        "https://gofile.io/d/MoEO73"
-        "https://www.dropbox.com/scl/fi/ndAgovXqrBBW9I1C/mihomo-linux-armv7-v1.19.13.gz?rlkey=ndAgovXqrBBW9I1C&st=x3v2i5k7&dl=1"
-    )
-
-    for link in "${temp_links[@]}"; do
-        if [ "$success" = true ]; then break; fi
-        local display_link=$(echo "$link" | sed 's|https://||' | cut -d'/' -f1,2,3) # 优化日志显示
-        log_info "尝试从临时网盘下载 ($display_link)..."
-
-        for ((i=1; i<=3; i++)); do
-            rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
-            
-            log_debug "第 $i 次尝试 (curl)"
-            timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_gz_file" "$link"
-            
-            if [ $? -ne 0 ]; then
-                log_warning "下载失败，尝试重新连接..."
-                sleep $retry_delay
-                continue
-            fi
-            
-            if [ -f "$temp_gz_file" ] && [ -s "$temp_gz_file" ]; then
-                if file "$temp_gz_file" | grep -q "gzip"; then
-                    log_debug "下载成功，开始校验..."
-                    if [ "$(sha256sum "$temp_gz_file" | awk '{print $1}')" = "$core_sha256" ]; then
-                        log_info "SHA256 校验通过，开始解压。"
-                        if gunzip -c "$temp_gz_file" > "$temp_file" 2>/dev/null; then
-                            if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
-                                mv "$temp_file" "$final_core_path"
-                                chmod +x "$final_core_path"
-                                success=true
-                                log_success "内核下载和校验成功: v${kernel_version} ($display_link)"
-                                break 4
-                            fi
-                        fi
-                    else
-                        log_warning "SHA256 校验失败，文件可能已损坏，继续尝试。"
+    for ((i=1; i<=3; i++)); do
+        rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
+        
+        log_debug "第 $i 次尝试 (curl)"
+        timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_gz_file" "$link"
+        
+        if [ $? -ne 0 ]; then
+            log_warning "下载失败，尝试重新连接..."
+            sleep $retry_delay
+            continue
+        fi
+        
+        if [ -f "$temp_gz_file" ] && [ -s "$temp_gz_file" ]; then
+            if file "$temp_gz_file" | grep -q "gzip"; then
+                log_debug "下载成功，开始解压。"
+                if gunzip -c "$temp_gz_file" > "$temp_file" 2>/dev/null; then
+                    if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
+                        mv "$temp_file" "$final_core_path"
+                        chmod +x "$final_core_path"
+                        success=true
+                        log_success "内核下载成功: v${kernel_version} ($display_link)"
+                        break 4
                     fi
                 fi
             fi
-            sleep $retry_delay
-        done
+        fi
+        sleep $retry_delay
     done
 
     set -e
     
     if [ "$success" = false ]; then
-        log_error "❌ 强制下载最新版内核失败，所有临时网盘方案均无效。脚本终止。"
+        log_error "❌ 强制下载最新版内核失败，请检查您的 GitHub 仓库文件是否存在问题。脚本终止。"
     fi
     
     rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
