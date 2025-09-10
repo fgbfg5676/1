@@ -301,47 +301,50 @@ try_git_mirrors() {
 }
 
 # -------------------- 修复版内核下载函数 --------------------
-# 云编译环境专用的 OpenClash 内核下载函数（超强版）
+# 修正版内核下载函数 - 解决架构匹配和版本下载问题
 download_clash_core() {
     log_step "云编译环境专用 OpenClash 内核下载 (mihomo/clash.meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
     safe_mkdir "$core_dir"
     
     # 云编译环境专用配置
-    local download_timeout=180  # 缩短超时时间
+    local download_timeout=180
     local connection_timeout=30
     local retry_delay=3
-    local max_mirrors=5
+    local max_mirrors=3
     
-    # 定义多架构支持
+    # 修正架构匹配逻辑 - 处理 MIPS 架构的特殊情况
     local target_arch="armv7"
     if grep -q "CONFIG_TARGET_.*aarch64" "$CONFIG_FILE" 2>/dev/null; then
         target_arch="arm64"
     elif grep -q "CONFIG_TARGET_.*x86_64" "$CONFIG_FILE" 2>/dev/null; then
         target_arch="amd64"
+    elif grep -q "CONFIG_TARGET_.*mips.*el" "$CONFIG_FILE" 2>/dev/null; then
+        target_arch="mipsle"
     elif grep -q "CONFIG_TARGET_.*mips" "$CONFIG_FILE" 2>/dev/null; then
         target_arch="mips"
+    elif grep -q "CONFIG_TARGET_ipq40xx" "$CONFIG_FILE" 2>/dev/null; then
+        # IPQ40xx 特殊处理 - 实际是 ARM 架构但经常被识别为 MIPS
+        target_arch="armv7"
+        log_info "IPQ40xx 平台检测，强制使用 armv7 架构"
     fi
     
-    log_info "检测到目标架构: $target_arch"
+    log_info "最终确定目标架构: $target_arch"
     
-    # 预定义多版本内核列表（按稳定性排序）
+    # 修正版本列表 - 使用确实存在的版本
     local kernel_versions=(
-        "1.19.2"  # 最稳定版本
-        "1.18.8"  # 长期支持版本
-        "1.18.6"  # 备用版本
-        "1.17.0"  # 兜底版本
+        "1.19.8"   # 最新稳定版
+        "1.18.8"   # LTS 版本
+        "1.18.6"   # 备用版本
+        "1.17.0"   # 兜底版本
+        "1.16.0"   # 更老的兜底版本
     )
     
-    # 高可用镜像列表（专为云环境优化）
+    # 精简高可用镜像列表
     local mirror_prefixes=(
-        "https://github.com"                    # 原始源
-        "https://ghproxy.com/https://github.com" # 代理1
-        "https://mirror.ghproxy.com/https://github.com" # 代理2
-        "https://ghp.ci/https://github.com"     # 代理3
-        "https://gh-proxy.com/https://github.com" # 代理4
-        "https://gitclone.com/github.com"       # 代理5
-        "https://hub.gitmirror.com/https://github.com" # 代理6
+        "https://ghproxy.com/https://github.com"
+        "https://mirror.ghproxy.com/https://github.com"
+        "https://github.com"
     )
     
     local temp_file="/tmp/clash_core_$$"
@@ -350,27 +353,19 @@ download_clash_core() {
     
     log_info "开始云环境内核下载流程..."
     
-    # 方法1：尝试获取最新版本（带超时保护）
+    # 方法1：尝试获取最新版本（缩短超时时间）
     local latest_tag=""
     local api_urls=(
-        "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
         "https://ghproxy.com/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-        "https://mirror.ghproxy.com/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+        "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
     )
     
     for api_url in "${api_urls[@]}"; do
-        log_info "尝试获取最新版本: $(echo "$api_url" | cut -d'/' -f3)"
+        log_info "尝试获取最新版本: $(echo "$api_url" | cut -d'/' -f3-4)"
         if command -v curl >/dev/null 2>&1; then
-            latest_tag=$(timeout 20 curl -fsSL --connect-timeout 10 --max-time 20 \
+            latest_tag=$(timeout 15 curl -fsSL --connect-timeout 8 --max-time 15 \
                 -H "Accept: application/vnd.github.v3+json" \
                 -H "User-Agent: OpenWrt-Build-Script" \
-                "$api_url" 2>/dev/null | \
-                grep -o '"tag_name":[[:space:]]*"[^"]*"' | \
-                sed 's/"tag_name":[[:space:]]*"//;s/"//' | head -1)
-        elif command -v wget >/dev/null 2>&1; then
-            latest_tag=$(timeout 20 wget -qO- --connect-timeout=10 --read-timeout=20 \
-                --header="Accept: application/vnd.github.v3+json" \
-                --user-agent="OpenWrt-Build-Script" \
                 "$api_url" 2>/dev/null | \
                 grep -o '"tag_name":[[:space:]]*"[^"]*"' | \
                 sed 's/"tag_name":[[:space:]]*"//;s/"//' | head -1)
@@ -378,16 +373,11 @@ download_clash_core() {
         
         if [ -n "$latest_tag" ] && [[ "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             log_info "成功获取最新版本: $latest_tag"
-            # 将最新版本添加到版本列表前面
             kernel_versions=("${latest_tag#v}" "${kernel_versions[@]}")
             break
         fi
-        sleep 2
+        sleep 1
     done
-    
-    if [ -z "$latest_tag" ]; then
-        log_warning "API 请求失败，使用预设版本列表"
-    fi
     
     # 方法2：智能多版本下载策略
     for version in "${kernel_versions[@]}"; do
@@ -395,60 +385,73 @@ download_clash_core() {
         
         log_info "尝试下载内核版本: $version (架构: $target_arch)"
         
-        # 定义该版本的所有可能下载路径
-        local download_paths=(
-            "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-$target_arch-$version.gz"
-            "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-$target_arch.gz"
-            "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-$target_arch-v$version.gz"
-        )
+        # 修正文件名匹配规则 - 根据实际发布情况调整
+        local download_paths=()
+        case "$target_arch" in
+            "armv7"|"arm")
+                download_paths=(
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-armv7-$version.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-arm-$version.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-armv7.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7-v$version.gz"
+                )
+                ;;
+            "arm64"|"aarch64")
+                download_paths=(
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-arm64-$version.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-arm64.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-arm64-v$version.gz"
+                )
+                ;;
+            "amd64"|"x86_64")
+                download_paths=(
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-amd64-$version.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-amd64.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-amd64-v$version.gz"
+                )
+                ;;
+            "mips")
+                download_paths=(
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mips-hardfloat-$version.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mips-$version.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-hardfloat-v$version.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-v$version.gz"
+                )
+                ;;
+            "mipsle")
+                download_paths=(
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mipsle-hardfloat-$version.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mipsle-$version.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mipsle-hardfloat-v$version.gz"
+                )
+                ;;
+        esac
         
         # 为每个版本尝试所有镜像
         for path in "${download_paths[@]}"; do
             if [ "$download_success" = true ]; then break; fi
             
-            local mirrors_tried=0
             for mirror_prefix in "${mirror_prefixes[@]}"; do
-                if [ "$download_success" = true ] || [ $mirrors_tried -ge $max_mirrors ]; then break; fi
-                mirrors_tried=$((mirrors_tried + 1))
+                if [ "$download_success" = true ]; then break; fi
                 
                 local download_url="${mirror_prefix}${path}"
-                log_info "[$mirrors_tried/$max_mirrors] 尝试下载: $(basename "$path")"
-                log_debug "下载地址: $download_url"
+                log_info "尝试下载: $(basename "$path") 来源: $(echo "$mirror_prefix" | cut -d'/' -f3)"
                 
-                # 使用多种下载工具尝试
-                local download_tools=("curl" "wget")
-                for tool in "${download_tools[@]}"; do
-                    if [ "$download_success" = true ]; then break; fi
-                    if ! command -v "$tool" >/dev/null 2>&1; then continue; fi
-                    
-                    case "$tool" in
-                        "curl")
-                            timeout $download_timeout curl -fsSL \
-                                --connect-timeout $connection_timeout \
-                                --max-time $download_timeout \
-                                --retry 2 --retry-delay $retry_delay \
-                                --user-agent "OpenWrt-Build-Script/1.0" \
-                                --header "Accept: application/octet-stream" \
-                                -o "$temp_file.gz" "$download_url" 2>/dev/null
-                            ;;
-                        "wget")
-                            timeout $download_timeout wget -q --no-check-certificate \
-                                --connect-timeout=$connection_timeout \
-                                --read-timeout=$download_timeout \
-                                --tries=2 --waitretry=$retry_delay \
-                                --user-agent="OpenWrt-Build-Script/1.0" \
-                                --header="Accept: application/octet-stream" \
-                                -O "$temp_file.gz" "$download_url" 2>/dev/null
-                            ;;
-                    esac
-                    
-                    # 验证下载文件
-                    if [ -f "$temp_file.gz" ] && [ -s "$temp_file.gz" ]; then
-                        # 检查文件类型
-                        if file "$temp_file.gz" 2>/dev/null | grep -q "gzip"; then
-                            log_info "验证并解压内核文件..."
-                            # 测试 gzip 文件完整性
-                            if gunzip -t "$temp_file.gz" 2>/dev/null; then
+                # 使用 curl 下载
+                if command -v curl >/dev/null 2>&1; then
+                    if timeout $download_timeout curl -fsSL \
+                        --connect-timeout $connection_timeout \
+                        --max-time $download_timeout \
+                        --retry 1 --retry-delay $retry_delay \
+                        --user-agent "OpenWrt-Build-Script/1.0" \
+                        --header "Accept: application/octet-stream" \
+                        -o "$temp_file.gz" "$download_url" 2>/dev/null; then
+                        
+                        # 验证下载文件
+                        if [ -f "$temp_file.gz" ] && [ -s "$temp_file.gz" ]; then
+                            # 检查文件类型和完整性
+                            if file "$temp_file.gz" 2>/dev/null | grep -q "gzip" && gunzip -t "$temp_file.gz" 2>/dev/null; then
+                                log_info "验证并解压内核文件..."
                                 # 解压缩
                                 if gunzip -c "$temp_file.gz" > "$temp_file" 2>/dev/null; then
                                     # 验证是否为有效的可执行文件
@@ -457,7 +460,7 @@ download_clash_core() {
                                         if mv "$temp_file" "$final_core_path" 2>/dev/null; then
                                             chmod +x "$final_core_path"
                                             download_success=true
-                                            log_success "内核下载成功: v$version ($tool, $(echo "$download_url" | cut -d'/' -f3))"
+                                            log_success "内核下载成功: v$version ($(echo "$download_url" | cut -d'/' -f3))"
                                             break
                                         fi
                                     fi
@@ -465,86 +468,83 @@ download_clash_core() {
                             fi
                         fi
                     fi
-                    
-                    # 清理临时文件
-                    rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
-                    
-                    # 短暂延迟避免请求过快
-                    sleep 1
-                done
+                fi
                 
-                # 镜像间延迟
-                [ $mirrors_tried -lt ${#mirror_prefixes[@]} ] && sleep 2
+                # 清理临时文件
+                rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
+                sleep 1
             done
         done
         
         # 版本间延迟
-        [ "$download_success" = false ] && sleep 3
+        [ "$download_success" = false ] && sleep 2
     done
     
-    # 方法3：尝试 OpenClash 官方预编译包（tar.gz格式）
+    # 方法3：尝试 OpenClash 官方预编译包
     if [ "$download_success" = false ]; then
         log_warning "mihomo 下载失败，尝试 OpenClash 官方预编译包..."
-        local openclash_paths=(
-            "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-$target_arch.tar.gz"
-            "/vernesong/OpenClash/raw/core/master/core_version"  # 获取推荐版本
-        )
         
-        for mirror_prefix in "${mirror_prefixes[@]}"; do
+        local openclash_paths=()
+        case "$target_arch" in
+            "armv7"|"arm")
+                openclash_paths=("/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7.tar.gz")
+                ;;
+            "arm64")
+                openclash_paths=("/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-arm64.tar.gz")
+                ;;
+            "amd64")
+                openclash_paths=("/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-amd64.tar.gz")
+                ;;
+            "mips")
+                openclash_paths=(
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-hardfloat.tar.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips.tar.gz"
+                )
+                ;;
+        esac
+        
+        for path in "${openclash_paths[@]}"; do
             if [ "$download_success" = true ]; then break; fi
             
-            local download_url="${mirror_prefix}${openclash_paths[0]}"
-            log_info "尝试下载官方预编译包: $(basename "${openclash_paths[0]}")"
-            
-            if timeout $download_timeout curl -fsSL \
-                --connect-timeout $connection_timeout \
-                --max-time $download_timeout \
-                --retry 1 --retry-delay 2 \
-                -o "$temp_file.tar.gz" "$download_url" 2>/dev/null; then
+            for mirror_prefix in "${mirror_prefixes[@]}"; do
+                if [ "$download_success" = true ]; then break; fi
                 
-                if [ -s "$temp_file.tar.gz" ] && file "$temp_file.tar.gz" | grep -q "gzip"; then
-                    local extract_dir="/tmp/clash_extract_$$"
-                    mkdir -p "$extract_dir"
+                local download_url="${mirror_prefix}${path}"
+                log_info "尝试下载官方预编译包: $(basename "$path")"
+                
+                if timeout $download_timeout curl -fsSL \
+                    --connect-timeout $connection_timeout \
+                    --max-time $download_timeout \
+                    --retry 1 --retry-delay 2 \
+                    -o "$temp_file.tar.gz" "$download_url" 2>/dev/null; then
                     
-                    if tar -xzf "$temp_file.tar.gz" -C "$extract_dir" 2>/dev/null; then
-                        # 查找可执行文件
-                        local clash_bin=$(find "$extract_dir" -name "clash*" -type f -executable 2>/dev/null | head -1)
-                        if [ -n "$clash_bin" ] && [ -f "$clash_bin" ]; then
-                            if file "$clash_bin" | grep -q "ELF.*executable"; then
-                                mv "$clash_bin" "$final_core_path"
-                                chmod +x "$final_core_path"
-                                download_success=true
-                                log_success "OpenClash 官方包下载成功: $(basename "$clash_bin")"
+                    if [ -s "$temp_file.tar.gz" ] && file "$temp_file.tar.gz" | grep -q "gzip"; then
+                        local extract_dir="/tmp/clash_extract_$$"
+                        mkdir -p "$extract_dir"
+                        
+                        if tar -xzf "$temp_file.tar.gz" -C "$extract_dir" 2>/dev/null; then
+                            # 查找可执行文件
+                            local clash_bin=$(find "$extract_dir" -name "clash*" -type f -executable 2>/dev/null | head -1)
+                            if [ -n "$clash_bin" ] && [ -f "$clash_bin" ]; then
+                                if file "$clash_bin" | grep -q "ELF.*executable"; then
+                                    mv "$clash_bin" "$final_core_path"
+                                    chmod +x "$final_core_path"
+                                    download_success=true
+                                    log_success "OpenClash 官方包下载成功: $(basename "$clash_bin")"
+                                fi
                             fi
                         fi
+                        rm -rf "$extract_dir"
                     fi
-                    rm -rf "$extract_dir"
+                    rm -f "$temp_file.tar.gz"
                 fi
-                rm -f "$temp_file.tar.gz"
-            fi
-            
-            [ "$download_success" = false ] && sleep 2
+                
+                [ "$download_success" = false ] && sleep 2
+            done
         done
     fi
     
-    # 方法4：云环境专用的静态备份地址
-    if [ "$download_success" = false ]; then
-        log_warning "尝试云环境专用静态备份源..."
-        local static_backup_urls=(
-            "https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version"
-            "https://cdn.jsdelivr.net/gh/vernesong/OpenClash@core/core_version"
-        )
-        
-        # 这里可以添加一些知名的静态文件托管服务作为备份
-        for backup_url in "${static_backup_urls[@]}"; do
-            if [ "$download_success" = true ]; then break; fi
-            log_info "尝试备份源: $(echo "$backup_url" | cut -d'/' -f3)"
-            # 根据实际情况实现静态备份下载逻辑
-            sleep 1
-        done
-    fi
-    
-    # 方法5：创建智能占位符（包含自动更新逻辑）
+    # 方法4：创建智能占位符（保持不变）
     if [ "$download_success" = false ]; then
         log_warning "所有下载尝试失败，创建智能占位符"
         cat > "$final_core_path" << 'SMART_PLACEHOLDER_EOF'
@@ -569,14 +569,15 @@ download_core() {
         "armv7l"|"armv7") arch="armv7" ;;
         "aarch64"|"arm64") arch="arm64" ;;
         "x86_64") arch="amd64" ;;
-        "mips") arch="mips" ;;
+        "mips") arch="mips-hardfloat" ;;
+        "mipsel") arch="mipsle-hardfloat" ;;
         *) arch="armv7" ;;
     esac
     
     # 内核下载地址
     local urls=(
         "https://ghproxy.com/https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-$arch.gz"
-        "https://mirror.ghproxy.com/https://github.com/MetaCubeX/mihomo/releases/download/v1.19.2/mihomo-linux-$arch-1.19.2.gz"
+        "https://mirror.ghproxy.com/https://github.com/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-$arch.tar.gz"
         "https://ghproxy.com/https://github.com/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-$arch.tar.gz"
     )
     
@@ -678,7 +679,11 @@ SMART_PLACEHOLDER_EOF
         return 1
     fi
 }
-
+        
+       
+            
+         
+  
 import_passwall_keys() {
     log_step "导入 Passwall2 软件源密钥"
     local key_dir="package/base-files/files/etc/opkg/keys"
