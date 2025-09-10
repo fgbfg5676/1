@@ -1,18 +1,14 @@
 #!/bin/bash
 #
-# Manus-V2.0: OpenWrt 雲編譯一站式解決方案 (根源修正版)
+# Manus-V2.2: OpenWrt 編譯輔助腳本 (精簡版)
 #
-# V2.0 更新日誌:
-# 1. 根源修正: 在放置核心前，強制刪除可能存在的佔位文件或目錄 (.../core/clash)，從根源上杜絕 "dangling symlink" 問題。
-# 2. 流程固化: 採用最穩健的文件操作流程，確保腳本的絕對可靠性。
-# 3. 終極版本: 這是結合了所有成功經驗和失敗教訓的最終版本。
+# V2.2 更新日誌:
+# 1. 職責單一: 根據您的要求，本腳本不再生成任何 .config 文件內容。
+# 2. 純粹輔助: 只專注於下載插件、放置核心、創建設備文件等 `make` 無法完成的任務。
+# 3. 無縫集成: 可以完美地在您現有的、自帶 .config 的編譯工作流中作為預處理步驟運行。
 #
 # 使用方法:
-# 1. 將此腳本保存為 manus_build.sh。
-# 2. 放置於 OpenWrt 源碼根目錄下。
-# 3. 執行 chmod +x manus_build.sh。
-# 4. 執行 ./manus_build.sh。
-# 5. 腳本成功執行後，運行 make -j$(nproc) 開始編譯。
+# 1. 在您的編譯工作流中，在 `make` 命令之前，運行此腳本。
 #
 
 # --- 嚴格模式 ---
@@ -249,26 +245,19 @@ setup_openclash_core() {
     local OPENCLASH_CORE_DIR="$CUSTOM_PLUGINS_DIR/luci-app-openclash/root/etc/openclash/core"
     mkdir -p "$OPENCLASH_CORE_DIR"
     
-    # --- 根源修正操作流程 ---
-    
-    # 1. 清理環境：強制刪除可能存在的舊文件或佔位符目錄
     log_info "清理可能存在的舊核心文件和鏈接..."
     rm -rf "$OPENCLASH_CORE_DIR/clash"
     rm -rf "$OPENCLASH_CORE_DIR/clash_meta"
 
-    # 2. 移動文件到目標位置
     log_info "正在放置核心文件到 $OPENCLASH_CORE_DIR"
     mv "$temp_bin" "$OPENCLASH_CORE_DIR/clash_meta"
     
-    # 3. 為核心文件賦予執行權限
     log_info "設置 clash_meta 執行權限..."
     chmod +x "$OPENCLASH_CORE_DIR/clash_meta"
 
-    # 4. 創建指向已存在且權限正確的文件的軟鏈接
     log_info "創建軟鏈接 clash -> clash_meta..."
     ln -sf "$OPENCLASH_CORE_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash"
 
-    # 5. 最終權限校驗
     if [ -x "$OPENCLASH_CORE_DIR/clash_meta" ] && [ -L "$OPENCLASH_CORE_DIR/clash" ]; then
         log_success "核心文件和軟鏈接權限驗證通過 ✅"
     else
@@ -279,125 +268,24 @@ setup_openclash_core() {
 }
 
 # =================================================================
-# 步驟 5: 生成最終 .config 文件
-# =================================================================
-generate_final_config() {
-    log_step "步驟 5: 生成最終 .config 配置文件"
-    
-    rm -f .config .config.old
-    
-    cat > .config <<EOF
-#
-# Target
-#
-CONFIG_TARGET_ipq40xx=y
-CONFIG_TARGET_ipq40xx_generic=y
-CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y
-CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y
-
-#
-# Base system
-#
-CONFIG_PACKAGE_bash=y
-CONFIG_PACKAGE_curl=y
-CONFIG_PACKAGE_wget=y
-CONFIG_PACKAGE_unzip=y
-CONFIG_PACKAGE_coreutils=y
-CONFIG_PACKAGE_coreutils-nohup=y
-CONFIG_PACKAGE_ca-certificates=y
-CONFIG_PACKAGE_dnsmasq-full=y
-CONFIG_PACKAGE_firewall4=y
-CONFIG_PACKAGE_ip-full=y
-CONFIG_PACKAGE_ipset=y
-CONFIG_PACKAGE_iptables-nft=y
-CONFIG_PACKAGE_jsonfilter=y
-CONFIG_PACKAGE_ruby=y
-CONFIG_PACKAGE_ruby-yaml=y
-
-#
-# Kernel modules
-#
-CONFIG_PACKAGE_kmod-tun=y
-CONFIG_PACKAGE_kmod-ipt-nat=y
-CONFIG_PACKAGE_kmod-ipt-core=y
-CONFIG_PACKAGE_kmod-ipt-conntrack=y
-CONFIG_PACKAGE_kmod-ipt-socket=y
-CONFIG_PACKAGE_kmod-ipt-tproxy=y
-CONFIG_PACKAGE_kmod-nft-tproxy=y
-CONFIG_PACKAGE_kmod-nft-socket=y
-CONFIG_PACKAGE_kmod-usb-storage=y
-CONFIG_PACKAGE_kmod-scsi-generic=y
-CONFIG_PACKAGE_kmod-fs-ext4=y
-
-#
-# LuCI
-#
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-CONFIG_PACKAGE_luci-compat=y
-
-#
-# LuCI Applications (The Trio)
-#
-CONFIG_PACKAGE_luci-app-openclash=y
-CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y
-CONFIG_PACKAGE_luci-app-passwall2=y
-CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y
-CONFIG_PACKAGE_luci-app-partexp=y
-
-#
-# Passwall2 Dependencies
-#
-CONFIG_PACKAGE_xray-core=y
-CONFIG_PACKAGE_sing-box=y
-CONFIG_PACKAGE_chinadns-ng=y
-CONFIG_PACKAGE_haproxy=y
-CONFIG_PACKAGE_hysteria=y
-CONFIG_PACKAGE_v2ray-geoip=y
-CONFIG_PACKAGE_v2ray-geosite=y
-CONFIG_PACKAGE_tcping=y
-
-#
-# Partexp Dependencies
-#
-CONFIG_PACKAGE_parted=y
-CONFIG_PACKAGE_lsblk=y
-CONFIG_PACKAGE_fdisk=y
-CONFIG_PACKAGE_block-mount=y
-CONFIG_PACKAGE_e2fsprogs=y
-
-#
-# WiFi Drivers (Standard, not CT)
-#
-CONFIG_PACKAGE_kmod-ath10k=y
-CONFIG_PACKAGE_ath10k-firmware-qca4019=y
-EOF
-
-    log_info "正在更新和安裝 feeds..."
-    ./scripts/feeds update -a
-    ./scripts/feeds install -a
-    
-    log_info "正在生成最終 defconfig..."
-    make defconfig
-    
-    log_success ".config 文件已生成！"
-}
-
-# =================================================================
 # 主執行函數
 # =================================================================
 main() {
-    log_step "Manus-V2.0 編譯準備腳本啟動"
+    log_step "Manus-V2.2 編譯輔助腳本啟動"
     
     check_environment_and_deps
     setup_device_config
     setup_plugins
     setup_openclash_core
-    generate_final_config
     
-    log_step "🎉 全部準備工作已成功完成！"
-    log_info "現在您可以運行 'make -j\$(nproc)' 來開始編譯固件了。"
-    log_info "如果需要自定義更多選項，請運行 'make menuconfig'。"
+    # 移除所有 .config 生成和 feeds 操作，因為這些由工作流處理
+    log_step "更新 Feeds..."
+    ./scripts/feeds update -a
+    ./scripts/feeds install -a
+    log_success "Feeds 更新安裝完成。"
+
+    log_step "🎉 預處理腳本執行完畢！"
+    log_info "現在編譯工作流可以繼續執行 'make' 命令了。"
 }
 
 # --- 執行主函數 ---
