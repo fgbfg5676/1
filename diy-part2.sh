@@ -332,16 +332,18 @@ try_git_mirrors() {
 }
 
 # -------------------- 内核下载函数 (已修改为临时网盘专用) --------------------
-# -------------------- 内核下载函数 (已修复错误处理) --------------------
+# -------------------- 内核下载函数 (最终修复版) --------------------
 download_clash_core_improved() {
     log_step "强制下载最新 OpenClash 内核 (mihomo/clash.meta)"
+    # 暂时关闭 set -e，确保下载失败不会立即退出
+    set +e
+    
     local core_dir="package/base-files/files/etc/openclash/core"
     safe_mkdir "$core_dir"
     local kernel_version="1.19.13"
     local download_timeout=120
     local connection_timeout=20
     local retry_delay=2
-    local core_name="mihomo-linux-${ARCH}-v${kernel_version}.gz"
     local final_core_path="$core_dir/clash_meta"
     local temp_gz_file="/tmp/clash_core_$$"
     local temp_file="/tmp/clash_core_unzipped_$$"
@@ -360,6 +362,7 @@ download_clash_core_improved() {
     esac
 
     local temp_links=(
+        "https://raw.githubusercontent.com/fgbfg5676/1/main/mihomo-linux-armv7-v1.19.13.gz" # 新增的 GitHub 原始文件链接
         "https://drive.google.com/uc?export=download&id=1Gnk8dGXkUjIfGe9enzH1v1hnVVDVlMY_"
         "https://u.ua/d/Du6sN44/"
         "https://gofile.io/d/MoEO73"
@@ -368,21 +371,21 @@ download_clash_core_improved() {
 
     for link in "${temp_links[@]}"; do
         if [ "$success" = true ]; then break; fi
-        local display_link=$(echo "$link" | sed 's|https://||' | cut -d'/' -f1)
+        local display_link=$(echo "$link" | sed 's|https://||' | cut -d'/' -f1,2,3) # 优化日志显示
         log_info "尝试从临时网盘下载 ($display_link)..."
 
         for ((i=1; i<=3; i++)); do
             rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
             
             log_debug "第 $i 次尝试 (curl)"
-            # 在这里使用 'if ! ...' 反转逻辑，避免 set -e 立即退出
-            if ! timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_gz_file" "$link" 2>/dev/null; then
+            timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_gz_file" "$link"
+            
+            if [ $? -ne 0 ]; then
                 log_warning "下载失败，尝试重新连接..."
                 sleep $retry_delay
-                continue # 继续下一次循环尝试
+                continue
             fi
-
-            # 下载成功，开始校验
+            
             if [ -f "$temp_gz_file" ] && [ -s "$temp_gz_file" ]; then
                 if file "$temp_gz_file" | grep -q "gzip"; then
                     log_debug "下载成功，开始校验..."
@@ -406,6 +409,8 @@ download_clash_core_improved() {
         done
     done
 
+    set -e
+    
     if [ "$success" = false ]; then
         log_error "❌ 强制下载最新版内核失败，所有临时网盘方案均无效。脚本终止。"
     fi
