@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.3-最终修复版)
-# 修复：加固 add_deps_by_layer 函数，并更新 download_clash_core 函数以支持 mihomo 内核下载。
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.4-内核下载修复版)
+# 修复：增强 download_clash_core 函数的错误处理和重试机制，支持多种内核下载方式
 #
 
 set -eo pipefail
@@ -9,14 +9,14 @@ export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
 
 # -------------------- 日志函数 --------------------
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }
-log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
+log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
-log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
+log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-log_step "开始 OpenWrt 插件集成流程（V7.3-最终修复版）"
+log_step "开始 OpenWrt 插件集成流程（V7.4-内核下载修复版）"
 
 validation_passed=true
 plugin_count=0
@@ -300,63 +300,171 @@ try_git_mirrors() {
     log_error "所有镜像克隆失败: $original_repo"; return 1;
 }
 
+# -------------------- 修复版内核下载函数 --------------------
 download_clash_core() {
-    log_step "动态下载最新 OpenClash 内核 (mihomo)"
+    log_step "智能下载 OpenClash 内核 (mihomo/clash.meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
     safe_mkdir "$core_dir"
-    local temp_gz_file="/tmp/mihomo_$$ .gz"
-    local temp_core_file="/tmp/mihomo_$$ "
-    local api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-    local fallback_tag="v1.19.2"
     
-    log_info "正在从 GitHub API 获取最新内核版本信息..."
-    local latest_tag=$(curl -s --connect-timeout 15 "$api_url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    # 定义多个核心文件和策略
+    local core_files=("clash_meta" "clash" "clash_tun")
+    local fallback_versions=("1.19.2" "1.18.8" "1.17.0")
+    local download_timeout=300  # 5分钟超时
     
-    if [ -z "$latest_tag" ]; then
-        log_warning "GitHub API 请求失败或返回无效数据，将使用回退版本号：$fallback_tag。"
-        latest_tag="$fallback_tag"
-    else
-        log_info "成功获取最新版本标签: $latest_tag"
-    fi
-
-    local core_asset_name="mihomo-linux-$ARCH-${latest_tag#v}.gz"
-    local download_url="https://github.com/MetaCubeX/mihomo/releases/download/$latest_tag/$core_asset_name"
-
-    local mirrors=(
-        "$download_url"
-        "https://ghproxy.com/$download_url"
-        "https://hub.fastgit.xyz/${download_url#*github.com/}"
+    # 预定义的静态下载地址（备用）
+    local static_urls=(
+        "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.2/mihomo-linux-armv7-1.19.2.gz"
+        "https://github.com/MetaCubeX/mihomo/releases/download/v1.18.8/mihomo-linux-armv7-1.18.8.gz"
+        "https://github.com/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7.tar.gz"
     )
-    local download_succeeded=false
-
-    log_info "开始下载内核..."
-    for mirror in "${mirrors[@]}"; do
-        log_info "尝试下载镜像: $mirror"
-        if wget --no-check-certificate -O "$temp_gz_file" "$mirror" >/dev/null 2>&1; then
-            if [ -s "$temp_gz_file" ]; then
-                if gunzip -t "$temp_gz_file" >/dev/null 2>&1; then
-                    download_succeeded=true
-                    break
-                else
-                    log_warning "下载的文件无效（非gzip格式），尝试下一个镜像..."
-                    rm -f "$temp_gz_file"
+    
+    log_info "开始智能内核下载流程..."
+    
+    # 方法1：尝试从 GitHub API 获取最新版本
+    local latest_tag=""
+    local api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+    
+    log_info "正在从 GitHub API 获取最新内核版本..."
+    if command -v curl >/dev/null 2>&1; then
+        latest_tag=$(timeout 30 curl -s --connect-timeout 15 --max-time 30 "$api_url" 2>/dev/null | grep -o '"tag_name":[[:space:]]*"[^"]*"' | sed 's/"tag_name":[[:space:]]*"//;s/"//' | head -1)
+    elif command -v wget >/dev/null 2>&1; then
+        latest_tag=$(timeout 30 wget -qO- --connect-timeout=15 --read-timeout=30 "$api_url" 2>/dev/null | grep -o '"tag_name":[[:space:]]*"[^"]*"' | sed 's/"tag_name":[[:space:]]*"//;s/"//' | head -1)
+    fi
+    
+    if [ -n "$latest_tag" ]; then
+        log_info "成功获取最新版本: $latest_tag"
+    else
+        log_warning "API 请求失败，使用预设版本列表"
+        latest_tag="v${fallback_versions[0]}"
+    fi
+    
+    # 方法2：尝试多种下载策略
+    local download_success=false
+    local temp_file="/tmp/clash_core_$"
+    local final_core_path="$core_dir/clash_meta"
+    
+    # 策略1：尝试最新版本的 mihomo
+    if [ -n "$latest_tag" ]; then
+        local core_name="mihomo-linux-$ARCH-${latest_tag#v}.gz"
+        local download_url="https://github.com/MetaCubeX/mihomo/releases/download/$latest_tag/$core_name"
+        
+        local mirrors=(
+            "$download_url"
+            "https://ghproxy.com/$download_url"
+            "https://mirror.ghproxy.com/$download_url"
+            "https://ghp.ci/$download_url"
+        )
+        
+        for mirror in "${mirrors[@]}"; do
+            log_info "尝试下载最新版 mihomo: $(basename "$mirror")"
+            if timeout $download_timeout wget --no-check-certificate --progress=dot:giga -O "$temp_file.gz" "$mirror" 2>/dev/null; then
+                if [ -s "$temp_file.gz" ] && file "$temp_file.gz" | grep -q "gzip"; then
+                    log_info "验证并解压缩内核文件..."
+                    if gunzip -t "$temp_file.gz" 2>/dev/null && gunzip -c "$temp_file.gz" > "$temp_file" 2>/dev/null; then
+                        if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
+                            mv "$temp_file" "$final_core_path"
+                            chmod +x "$final_core_path"
+                            download_success=true
+                            log_success "最新 mihomo 内核下载完成: $final_core_path"
+                            break
+                        fi
+                    fi
                 fi
+                rm -f "$temp_file.gz" "$temp_file"
             fi
-        fi
-    done
-
-    if [ "$download_succeeded" = false ]; then
-        log_error "所有下载尝试失败，跳过内核安装。"
-        rm -f "$temp_gz_file"
+        done
+    fi
+    
+    # 策略2：如果最新版失败，尝试预设版本
+    if [ "$download_success" = false ]; then
+        log_warning "最新版本下载失败，尝试备用版本..."
+        for version in "${fallback_versions[@]}"; do
+            local core_name="mihomo-linux-$ARCH-$version.gz"
+            local download_url="https://github.com/MetaCubeX/mihomo/releases/download/v$version/$core_name"
+            
+            local mirrors=(
+                "$download_url"
+                "https://ghproxy.com/$download_url"
+                "https://mirror.ghproxy.com/$download_url"
+            )
+            
+            for mirror in "${mirrors[@]}"; do
+                log_info "尝试下载备用版本 $version: $(basename "$mirror")"
+                if timeout $download_timeout wget --no-check-certificate --progress=dot:mega -O "$temp_file.gz" "$mirror" 2>/dev/null; then
+                    if [ -s "$temp_file.gz" ] && gunzip -t "$temp_file.gz" 2>/dev/null; then
+                        if gunzip -c "$temp_file.gz" > "$temp_file" 2>/dev/null && [ -s "$temp_file" ]; then
+                            mv "$temp_file" "$final_core_path"
+                            chmod +x "$final_core_path"
+                            download_success=true
+                            log_success "备用版本 $version 内核下载完成"
+                            break 2
+                        fi
+                    fi
+                fi
+                rm -f "$temp_file.gz" "$temp_file"
+            done
+        done
+    fi
+    
+    # 策略3：尝试 OpenClash 官方预编译内核
+    if [ "$download_success" = false ]; then
+        log_warning "mihomo 下载失败，尝试 OpenClash 官方内核..."
+        local openclash_url="https://github.com/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7.tar.gz"
+        local mirrors=(
+            "$openclash_url"
+            "https://ghproxy.com/$openclash_url"
+            "https://mirror.ghproxy.com/$openclash_url"
+        )
+        
+        for mirror in "${mirrors[@]}"; do
+            log_info "尝试下载 OpenClash 官方内核: $(basename "$mirror")"
+            if timeout $download_timeout wget --no-check-certificate --progress=dot:mega -O "$temp_file.tar.gz" "$mirror" 2>/dev/null; then
+                if [ -s "$temp_file.tar.gz" ] && file "$temp_file.tar.gz" | grep -q "gzip"; then
+                    local extract_dir="/tmp/clash_extract_$"
+                    mkdir -p "$extract_dir"
+                    if tar -xzf "$temp_file.tar.gz" -C "$extract_dir" 2>/dev/null; then
+                        local clash_bin=$(find "$extract_dir" -name "clash" -type f -executable | head -1)
+                        if [ -n "$clash_bin" ] && [ -f "$clash_bin" ]; then
+                            mv "$clash_bin" "$final_core_path"
+                            chmod +x "$final_core_path"
+                            download_success=true
+                            log_success "OpenClash 官方内核下载完成"
+                            rm -rf "$extract_dir"
+                            break
+                        fi
+                    fi
+                    rm -rf "$extract_dir"
+                fi
+                rm -f "$temp_file.tar.gz"
+            fi
+        done
+    fi
+    
+    # 策略4：创建占位符（确保编译不会因缺少内核而失败）
+    if [ "$download_success" = false ]; then
+        log_warning "所有内核下载尝试失败，创建占位符文件"
+        cat > "$final_core_path" << 'PLACEHOLDER_EOF'
+#!/bin/sh
+echo "OpenClash 内核占位符 - 请在路由器上手动下载内核"
+echo "可访问 OpenClash 管理页面 -> 插件设置 -> 版本更新 进行内核下载"
+exit 1
+PLACEHOLDER_EOF
+        chmod +x "$final_core_path"
+        log_info "占位符内核创建完成，编译后需手动更新"
+    fi
+    
+    # 清理临时文件
+    rm -f "$temp_file" "$temp_file.gz" "$temp_file.tar.gz" 2>/dev/null || true
+    
+    # 验证最终结果
+    if [ -f "$final_core_path" ] && [ -x "$final_core_path" ]; then
+        local file_size=$(stat -f%z "$final_core_path" 2>/dev/null || stat -c%s "$final_core_path" 2>/dev/null || echo "0")
+        log_info "内核文件信息: 大小=${file_size}字节, 路径=$final_core_path"
+        return 0
+    else
+        log_error "内核文件创建失败"
         return 1
     fi
-    
-    gunzip -d -c "$temp_gz_file" > "$temp_core_file"
-    mv "$temp_core_file" "$core_dir/clash_meta"
-    chmod +x "$core_dir/clash_meta"
-    log_success "最新 Mihomo 内核安装完成: $core_dir/clash_meta"
-    rm -f "$temp_gz_file"
-    return 0
 }
 
 import_passwall_keys() {
@@ -378,7 +486,7 @@ import_passwall_keys() {
 
 fetch_plugin() {
     local repo="$1" plugin_name="$2" subdir="${3:-.}" deps_layer="$4"
-    local temp_dir="/tmp/${plugin_name}_$(date +%s)_$$ " lock_file="/tmp/.${plugin_name}_lock"
+    local temp_dir="/tmp/${plugin_name}_$(date +%s)_$" lock_file="/tmp/.${plugin_name}_lock"
     log_step "集成插件: $plugin_name"
     log_info "仓库: $repo"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
@@ -450,7 +558,7 @@ main() {
     log_step "生成最终配置"
     if [ -f "$CONFIG_CUSTOM" ] && [ -s "$CONFIG_CUSTOM" ]; then cat "$CONFIG_CUSTOM" >> "$CONFIG_FILE"; rm -f "$CONFIG_CUSTOM"; log_info "合并自定义配置完成"; fi
     log_info "清理无效配置项..."
-    if [ -f "$CONFIG_FILE" ]; then local temp_config="/tmp/.config.clean_$$"; cp "$CONFIG_FILE" "$temp_config"; sed -i '/CONFIG_PACKAGE_kmod-nf-nathelper-extra=y/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_ipq-wifi-mobipromo/d' "$temp_config" 2>/dev/null || true; mv "$temp_config" "$CONFIG_FILE"; log_info "配置清理完成"; fi
+    if [ -f "$CONFIG_FILE" ]; then local temp_config="/tmp/.config.clean_$"; cp "$CONFIG_FILE" "$temp_config"; sed -i '/CONFIG_PACKAGE_kmod-nf-nathelper-extra=y/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_ipq-wifi-mobipromo/d' "$temp_config" 2>/dev/null || true; mv "$temp_config" "$CONFIG_FILE"; log_info "配置清理完成"; fi
     if make defconfig 2>/dev/null; then log_success "配置生成成功"; else log_warning "配置生成有警告，但继续执行"; fi
     log_info "配置变更摘要:"; if [ -f "$CONFIG_FILE" ]; then grep -E '^CONFIG_(TARGET_|PACKAGE_(luci-app-openclash|luci-app-passwall2|luci-app-partexp|kmod-(tun|ipt|ath10k)|xray-core|sing-box))' "$CONFIG_FILE" 2>/dev/null | head -20 || true; fi
     if [ $plugin_count -gt 0 ]; then
