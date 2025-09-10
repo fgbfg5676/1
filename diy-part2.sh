@@ -1,15 +1,14 @@
 #!/bin/bash
 #
-# Manus-V1.2: OpenWrt 雲編譯一站式解決方案 (核心修正版)
+# Manus-V1.3: OpenWrt 雲編譯一站式解決方案 (穩定最終版)
 #
-# V1.2 更新日誌:
-# 1. 修正核心分配: 移除將 Mihomo 核心錯誤地分配給 Passwall2 的邏輯。
-# 2. 恢復正確依賴: 確保 Mihomo 核心專供 OpenClash 使用。
-# 3. 配置文件恢復: 在 .config 中重新啟用 CONFIG_PACKAGE_xray-core=y，讓 Passwall2 能獲取其正確的核心依賴。
+# V1.3 更新日誌:
+# 1. 修正環境檢查: 移除了對 README.md 文件的不可靠檢查，改為只檢查核心目錄是否存在。
+# 2. 邏輯簡化: 回歸最直接、最穩定的執行流程。
 #
 # 使用方法:
 # 1. 將此腳本保存為 manus_build.sh。
-# 2. 放置於 coolsnowwolf/lede 源碼根目錄下。
+# 2. 放置於 OpenWrt 源碼根目錄下。
 # 3. 執行 chmod +x manus_build.sh。
 # 4. 執行 ./manus_build.sh。
 # 5. 腳本成功執行後，運行 make -j$(nproc) 開始編譯。
@@ -35,8 +34,9 @@ DOWNLOAD_TIMEOUT=300  # 5 分鐘
 # =================================================================
 check_environment_and_deps() {
     log_step "步驟 1: 檢查環境與依賴工具"
-    if [ ! -f "LICENSE" ] || ! grep -q "coolsnowwolf" "README.md"; then
-        log_error "腳本似乎不在 coolsnowwolf/lede 源碼根目錄下，請檢查。"
+    # 修正後的檢查：只檢查 'package' 和 'scripts' 這兩個 OpenWrt 源碼的核心目錄
+    if [ ! -d "package" ] || [ ! -d "scripts" ]; then
+        log_error "腳本必須在 OpenWrt 源碼根目錄下運行。請檢查當前路徑。"
     fi
 
     local tools=("git" "curl" "wget" "unzip" "grep" "sed" "awk" "gzip")
@@ -59,7 +59,6 @@ check_environment_and_deps() {
 setup_device_config() {
     log_step "步驟 2: 配置 CM520-79F 專用設備文件"
 
-    # --- 2.1: 寫入 DTS 文件 ---
     local DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
     local DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
     mkdir -p "$DTS_DIR"
@@ -132,7 +131,6 @@ setup_device_config() {
 EOF
     log_success "DTS 文件寫入成功: $DTS_FILE"
 
-    # --- 2.2: 寫入網絡配置文件 ---
     local BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
     mkdir -p "$BOARD_DIR"
     cat > "$BOARD_DIR/02_network" <<'EOF'
@@ -151,7 +149,6 @@ boot_hook_add preinit_main ipq40xx_board_detect
 EOF
     log_success "網絡配置文件創建完成: $BOARD_DIR/02_network"
 
-    # --- 2.3: 修改 generic.mk 配置文件 ---
     local GENERIC_MK="target/linux/ipq40xx/image/generic.mk"
     if ! grep -q "define Device/mobipromo_cm520-79f" "$GENERIC_MK"; then
         cat <<'EOF' >> "$GENERIC_MK"
@@ -215,7 +212,6 @@ setup_plugins() {
 setup_openclash_core() {
     log_step "步驟 4: 從指定源為 OpenClash 下載並放置 Mihomo 核心"
     
-    # 只使用您提供的鏈接，但需要轉換為 raw 格式
     local url="https://raw.githubusercontent.com/fgbfg5676/1/main/mihomo-linux-armv7-v1.19.13.gz"
     local temp_gz="/tmp/mihomo.gz"
     local temp_bin="/tmp/mihomo_core_unzipped"
@@ -254,7 +250,6 @@ setup_openclash_core() {
 generate_final_config() {
     log_step "步驟 5: 生成最終 .config 配置文件"
     
-    # 清理舊配置
     rm -f .config .config.old
     
     cat > .config <<EOF
@@ -358,7 +353,7 @@ EOF
 # 主執行函數
 # =================================================================
 main() {
-    log_step "Manus-V1.2 編譯準備腳本啟動"
+    log_step "Manus-V1.3 編譯準備腳本啟動"
     
     check_environment_and_deps
     setup_device_config
