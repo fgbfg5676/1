@@ -9,10 +9,10 @@ export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
 
 # -------------------- 日志函数 --------------------
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }
-log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
+log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
-log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
+log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
@@ -342,7 +342,6 @@ try_git_mirrors() {
 }
 
 # -------------------- 修复版内核下载函数 --------------------
-# 改进的内核下载函数（替换原有函数）
 download_clash_core_improved() {
     log_step "云编译环境专用 OpenClash 内核下载 (mihomo/clash.meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
@@ -353,19 +352,19 @@ download_clash_core_improved() {
     log_info "最终确定目标架构: $target_arch"
     
     # 云编译环境优化配置
-    local download_timeout=120  # 进一步缩短超时
+    local download_timeout=120
     local connection_timeout=20
     local retry_delay=2
     
-    # 精选稳定版本（去掉不存在的版本）
+    # 精选稳定版本
     local kernel_versions=(
-        "1.18.8"    # 验证存在的版本
+        "1.18.8"
         "1.18.6"
         "1.18.5"
         "1.17.0"
     )
     
-    # 最可靠的镜像源
+    # 可靠的镜像源
     local mirror_prefixes=(
         "https://ghproxy.com/https://github.com"
         "https://github.com"
@@ -377,16 +376,16 @@ download_clash_core_improved() {
     
     log_info "开始云环境内核下载流程..."
     
-    # 使用预设稳定版本列表，跳过 API 查询
+    # 使用预设稳定版本列表
     log_info "使用预设稳定版本列表，跳过 API 查询"
     
-    # 直接开始版本下载循环
+    # 下载循环
     for version in "${kernel_versions[@]}"; do
         if [ "$download_success" = true ]; then break; fi
         
         log_info "尝试下载内核版本: $version (架构: $target_arch)"
         
-        # 根据架构定义下载路径（使用验证过的路径格式）
+        # 根据架构定义下载路径
         local download_paths=()
         case "$target_arch" in
             "armv7"|"arm")
@@ -428,9 +427,8 @@ download_clash_core_improved() {
                 
                 log_info "尝试下载: $(basename "$path") 来源: $display_mirror"
                 
-                # 使用 curl 下载，增加错误处理
+                # 使用 curl 下载
                 if command -v curl >/dev/null 2>&1; then
-                    # 清理之前的临时文件
                     rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
                     
                     if timeout $download_timeout curl -fsSL \
@@ -441,7 +439,7 @@ download_clash_core_improved() {
                         --location \
                         -o "$temp_file.gz" "$download_url" 2>/dev/null; then
                         
-                        # 详细验证下载文件
+                        # 验证下载文件
                         if [ -f "$temp_file.gz" ] && [ -s "$temp_file.gz" ]; then
                             local file_size=$(stat -c%s "$temp_file.gz" 2>/dev/null || echo 0)
                             log_debug "下载文件大小: $file_size 字节"
@@ -452,13 +450,11 @@ download_clash_core_improved() {
                                 if gunzip -t "$temp_file.gz" 2>/dev/null; then
                                     log_info "解压内核文件..."
                                     if gunzip -c "$temp_file.gz" > "$temp_file" 2>/dev/null; then
-                                        # 验证解压后的文件
                                         if [ -s "$temp_file" ]; then
                                             local uncompressed_size=$(stat -c%s "$temp_file" 2>/dev/null || echo 0)
                                             log_debug "解压后文件大小: $uncompressed_size 字节"
                                             
                                             if file "$temp_file" 2>/dev/null | grep -q "ELF.*executable"; then
-                                                # 成功！移动到最终位置
                                                 if mv "$temp_file" "$final_core_path" 2>/dev/null; then
                                                     chmod +x "$final_core_path"
                                                     download_success=true
@@ -476,7 +472,6 @@ download_clash_core_improved() {
                                     log_warning "gzip 文件损坏"
                                 fi
                             elif echo "$path" | grep -q "\.tar\.gz$"; then
-                                # 处理 tar.gz 格式
                                 log_info "处理 tar.gz 格式文件..."
                                 local extract_dir="/tmp/clash_extract_$$"
                                 mkdir -p "$extract_dir"
@@ -502,25 +497,21 @@ download_clash_core_improved() {
                     fi
                 fi
                 
-                # 清理临时文件
                 rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
-                
-                # 短暂延迟
                 [ "$download_success" = false ] && sleep 1
             done
         done
         
-        # 版本间延迟
         [ "$download_success" = false ] && sleep 2
     done
     
-    # 如果所有版本都失败，创建智能占位符
+    # 创建智能占位符
     if [ "$download_success" = false ]; then
         log_warning "所有下载尝试失败，创建智能占位符"
         create_smart_placeholder "$final_core_path" "$target_arch"
     fi
     
-    # 创建必要的链接文件
+    # 创建链接
     setup_core_links "$core_dir"
     
     # 最终验证
@@ -605,6 +596,13 @@ download_core() {
     return 1
 }
 
+download_core
+EOF
+    chmod +x "$core_path"
+    log_success "智能占位符创建完成: $core_path"
+}
+
+# 创建内核链接
 setup_core_links() {
     local core_dir="$1"
     local file_path_base="$core_dir/clash_meta"
@@ -621,11 +619,12 @@ setup_core_links() {
     fi
 }
 
+# 导入 Passwall2 密钥
 import_passwall_keys() {
     log_step "导入 Passwall2 软件源密钥"
     local key_dir="package/base-files/files/etc/opkg/keys"
     safe_mkdir "$key_dir"
-    local key_urls=("https://openwrt.org/_export/keys/6243C1C880731018A6251B66789C7785659653D" "https://github.com/xiaorouji/openwrt-passwall2/raw/main/keys/9a22e228.pub")
+    local key_urls=("https://downloads.openwrt.org/snapshots/keys/6243c1c880731018a6251b66789c7785659653d0" "https://github.com/xiaorouji/openwrt-passwall2/raw/main/keys/9a22e228.pub")
     for url in "${key_urls[@]}"; do
         local key_file="$key_dir/$(basename "$url")"
         if ! wget --no-check-certificate -O "$key_file" "$url" 2>/dev/null; then
@@ -633,10 +632,12 @@ import_passwall_keys() {
             if ! wget --no-check-certificate -O "$key_file" "https://ghproxy.com/$url" 2>/dev/null; then log_warning "密钥导入失败（可选）"; continue; fi
         fi
         chmod 644 "$key_file" 2>/dev/null || true
+        log_info "密钥导入成功: $(basename "$url")"
     done
     log_success "Passwall2 密钥导入完成"
 }
 
+# 集成自定义插件
 add_custom_plugins() {
     log_step "集成自定义插件"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
@@ -662,6 +663,7 @@ add_custom_plugins() {
     if [ "$validation_passed" = true ]; then log_success "所有插件集成完成（共 $plugin_count 个）"; else log_warning "部分插件集成失败，请检查日志"; fi
 }
 
+# 检查并添加依赖
 check_all_dependencies() {
     log_step "检查并添加所有插件依赖"
     add_deps_by_layer "target"
@@ -674,12 +676,11 @@ check_all_dependencies() {
     log_success "所有依赖检查并添加完成"
 }
 
+# 生成最终配置文件
 generate_config_file() {
     log_step "生成最终 .config 文件"
-    # 将自动生成的自定义配置追加到主配置
-    cat "$CONFIG_CUSTOM" >> "$CONFIG_FILE"
-    # 清理临时文件
-    rm -f "$CONFIG_CUSTOM"
+    cat "$CONFIG_CUSTOM" >> "$CONFIG_FILE" 2>/dev/null || true
+    rm -f "$CONFIG_CUSTOM" 2>/dev/null
     log_success "配置已合并，请运行 'make menuconfig' 和 'make -j$(nproc)' 开始编译"
 }
 
@@ -696,10 +697,8 @@ main() {
     add_custom_plugins
     check_all_dependencies
     
-    # OpenClash内核下载
     download_clash_core_improved
     
-    # 将自定义配置合并到主配置
     generate_config_file
     
     log_success "脚本执行完毕！"
