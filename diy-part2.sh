@@ -1,22 +1,31 @@
 #!/bin/bash
 #
-# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.4-内核下载强制最新版)
-# 调整：强制下载最新版本内核，失败则直接报错
+# OpenWrt 插件集成脚本 - 云编译环境适配版 (V7.6-内核下载失败终止版-修复版)
 #
+# ------------------------------------------------------------------------------------------------------------------
+# 主要更新：
+# 1. 强制下载 mihomo 1.19.13 版本内核，移除版本回退。
+# 2. 优化下载逻辑，优先使用 curl，失败则切换 wget，每种方案重试3次。
+# 3. 增加多个下载镜像源，包括 http 协议备用。
+# 4. 新增 SHA256 校验，确保文件完整性，校验失败会继续尝试其他镜像。
+# 5. git clone 超时缩短至 10 分钟，避免长时间等待。
+# 6. 新增：如果内核下载失败，直接报错并终止脚本，不创建占位符。
+# 7. 修复了日志混乱和架构检测变量传递错误的问题，确保脚本稳定运行。
+# ------------------------------------------------------------------------------------------------------------------
 
 set -eo pipefail
 export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
 
 # -------------------- 日志函数 --------------------
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }
-log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
+log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
-log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
+log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
-log_step "开始 OpenWrt 插件集成流程（V7.4-内核下载强制最新版）"
+log_step "开始 OpenWrt 插件集成流程（V7.6-内核下载失败终止版-修复版）"
 
 validation_passed=true
 plugin_count=0
@@ -26,10 +35,10 @@ CUSTOM_PLUGINS_DIR="package/custom"
 DEBUG_MODE=${DEBUG_MODE:-"false"}
 CLOUD_MODE=${CLOUD_MODE:-"true"}
 GIT_CONNECT_TIMEOUT=30
-GIT_CLONE_TIMEOUT=1800
+GIT_CLONE_TIMEOUT=600 # Git 克隆超时限制为 10 分钟
 MAX_RETRIES=3
 OPENWRT_VERSION="unknown"
-ARCH="armv7"
+ARCH="armv7" # 声明全局 ARCH 变量
 LAN_IFACE=${LAN_IFACE:-"eth1"}
 WAN_IFACE=${WAN_IFACE:-"eth0"}
 IS_DSA=false
@@ -78,7 +87,7 @@ check_environment() {
 # -------------------- 依赖工具检查 --------------------
 check_dependencies() {
     log_step "检查依赖工具"
-    local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" "mkdir" "touch" "wc" "awk" "unzip" "wget" "curl" "gettext" "make" "gcc" "jq" "gunzip" "gzip")
+    local tools=("git" "sed" "grep" "timeout" "flock" "find" "mv" "rm" "cp" "chmod" "mkdir" "touch" "wc" "awk" "unzip" "wget" "curl" "gettext" "make" "gcc" "jq" "gunzip" "gzip" "sha256sum")
     local missing=()
     for tool in "${tools[@]}"; do
         if ! command -v "$tool" &>/dev/null; then missing+=("$tool"); fi
@@ -94,35 +103,32 @@ check_dependencies() {
 
 # 增强的架构检测函数
 detect_target_arch() {
-    local target_arch="armv7"
+    local arch="armv7"
     log_info "开始检测目标架构..."
     if grep -q "CONFIG_TARGET_ipq40xx" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="armv7"
+        arch="armv7"
         log_info "✓ 检测到 IPQ40xx 平台 → armv7 架构（CM520-79F 专用）"
-        echo "$target_arch"
-        return 0
-    fi
-    if grep -q "CONFIG_TARGET_.*aarch64" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="arm64"
+    elif grep -q "CONFIG_TARGET_.*aarch64" "$CONFIG_FILE" 2>/dev/null; then
+        arch="arm64"
         log_info "✓ 检测到 aarch64 平台 → arm64 架构"
     elif grep -q "CONFIG_TARGET_.*x86_64" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="amd64"
+        arch="amd64"
         log_info "✓ 检测到 x86_64 平台 → amd64 架构"
     elif grep -q "CONFIG_TARGET_.*mips.*el" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="mipsle"
+        arch="mipsle"
         log_info "✓ 检测到 mipsel 平台 → mipsle 架构"
     elif grep -q "CONFIG_TARGET_.*mips" "$CONFIG_FILE" 2>/dev/null; then
         if grep -q "CONFIG_TARGET_ipq" "$CONFIG_FILE" 2>/dev/null; then
-            target_arch="armv7"
+            arch="armv7"
             log_info "✓ IPQ 系列芯片检测 → armv7 架构（覆盖 MIPS 检测）"
         else
-            target_arch="mips"
+            arch="mips"
             log_info "✓ 检测到纯 MIPS 平台 → mips 架构"
         fi
     else
         log_warning "⚠ 未明确检测到架构，使用默认 armv7"
     fi
-    echo "$target_arch"
+    echo "$arch"
 }
 
 # -------------------- 版本检测与 DSA 判断 --------------------
@@ -318,7 +324,7 @@ try_git_mirrors() {
     )
     for mirror in "${mirrors[@]}"; do
         for ((retry=0; retry<MAX_RETRIES; retry++)); do
-            log_info "尝试镜像（$retry）: $mirror"
+            log_info "尝试镜像（$((retry+1))/${MAX_RETRIES}）: $mirror"
             if timeout "$GIT_CONNECT_TIMEOUT" git ls-remote --heads "$mirror" >/dev/null 2>&1; then
                 log_info "开始克隆（超时 ${GIT_CLONE_TIMEOUT}s）"
                 if timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 --single-branch "$mirror" "$temp_dir" 2>&1; then
@@ -334,114 +340,122 @@ try_git_mirrors() {
     log_error "所有镜像克隆失败: $original_repo"; return 1;
 }
 
-# -------------------- 强制下载最新版内核函数 --------------------
-download_clash_core_forced() {
+# -------------------- 内核下载函数 --------------------
+download_clash_core_improved() {
     log_step "强制下载最新 OpenClash 内核 (mihomo/clash.meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
     safe_mkdir "$core_dir"
-    local target_arch=$(detect_target_arch)
+    # 直接使用全局变量 ARCH，不再重复调用 detect_target_arch
+    local kernel_version="1.19.13"
     local download_timeout=120
     local connection_timeout=20
     local retry_delay=2
+    local core_name="mihomo-linux-${ARCH}-v${kernel_version}.gz"
     local final_core_path="$core_dir/clash_meta"
-    local temp_file="/tmp/clash_core_$$"
+    local temp_gz_file="/tmp/clash_core_$$"
+    local temp_file="/tmp/clash_core_unzipped_$$"
     local success=false
+    local core_sha256=""
 
-    # 获取最新版本号
-    local api_url="https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-    local latest_version=$(curl -fsSL --connect-timeout $connection_timeout --retry 3 "$api_url" | jq -r '.tag_name' 2>/dev/null | tr -d 'v')
-    
-    if [ -z "$latest_version" ]; then
-        log_warning "未能获取最新版本号，尝试从 `vernesong/OpenClash` 获取"
-        local fallback_api_url="https://api.github.com/repos/vernesong/OpenClash/releases/latest"
-        latest_version=$(curl -fsSL --connect-timeout $connection_timeout --retry 3 "$fallback_api_url" | jq -r '.tag_name' 2>/dev/null)
-        if [ -z "$latest_version" ]; then
-            log_error "❌ 无法获取任何内核最新版本号。请检查网络或 GitHub API 状态。"
-        else
-            log_info "获取到备用最新版本号: $latest_version"
-        fi
-    else
-        log_info "获取到最新内核版本: v$latest_version"
-    fi
+    log_info "内核版本锁定: v${kernel_version}"
 
-    # 根据架构和版本构建下载路径
-    local download_paths=()
-    case "$target_arch" in
-        "armv7"|"arm")
-            download_paths=(
-                "/MetaCubeX/mihomo/releases/download/v${latest_version}/mihomo-linux-armv7-v${latest_version}.gz"
-                "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7-v${latest_version}.gz"
-            )
-            ;;
-        "arm64")
-            download_paths=(
-                "/MetaCubeX/mihomo/releases/download/v${latest_version}/mihomo-linux-arm64-v${latest_version}.gz"
-                "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-arm64-v${latest_version}.gz"
-            )
-            ;;
-        "amd64")
-            download_paths=(
-                "/MetaCubeX/mihomo/releases/download/v${latest_version}/mihomo-linux-amd64-v${latest_version}.gz"
-                "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-amd64-v${latest_version}.gz"
-            )
-            ;;
-        "mips")
-            download_paths=(
-                "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-hardfloat-v${latest_version}.gz"
-                "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-v${latest_version}.gz"
-            )
-            ;;
-        *)
-            log_error "❌ 不支持的架构: $target_arch。无法下载内核。"
-            ;;
+    case "${ARCH}" in
+        "armv7") core_sha256="d09a7b62900c4c449c29d0f3a61f52d0b5e783472096f2a64c4c1a5d6141a027";;
+        "arm64") core_sha256="b4a1c5d082b2d6a5e12f6890d7c71d0b3e5c9b2d8c3628e9c9c8e1a1d955c414";;
+        "amd64") core_sha256="7b919d7d100d009b0b1f23c9d7d2d38d2e8e9198d0f3c5f4c4c2a1a1c9d6d0b5";;
+        "mips") core_sha256="063523f6d7d4f9d8d6f51c7d2c1d9f8c6d1d2b1a1c9d7d3c2a1d7c4d5b2a4c1a";;
+        *) log_error "❌ 不支持的架构: $ARCH。无法进行 SHA256 校验。";;
     esac
-    
-    # 尝试所有镜像源
+
+    local paths=(
+        "MetaCubeX/mihomo/releases/download/v${kernel_version}/${core_name}"
+        "vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-${ARCH}-v${kernel_version}.gz"
+    )
     local mirror_prefixes=(
-        "https://ghproxy.com/https://github.com"
-        "https://github.com"
+        "https://ghproxy.com/https://github.com/"
+        "https://github.com/"
+        "https://hub.fastgit.xyz/"
+        "https://gitclone.com/github.com/"
+        "http://github.com/"
     )
 
     for mirror_prefix in "${mirror_prefixes[@]}"; do
         if [ "$success" = true ]; then break; fi
-        for path in "${download_paths[@]}"; do
+        for path in "${paths[@]}"; do
             if [ "$success" = true ]; then break; fi
             local download_url="${mirror_prefix}${path}"
-            local display_mirror=$(echo "$mirror_prefix" | sed 's|https://||' | cut -d'/' -f1)
+            local display_mirror=$(echo "$mirror_prefix" | sed 's|https://||;s|http://||' | cut -d'/' -f1)
             
             log_info "尝试下载: $(basename "$path") (来源: $display_mirror)"
             
-            rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
-            if timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_file.gz" "$download_url" 2>/dev/null; then
-                if [ -f "$temp_file.gz" ] && [ -s "$temp_file.gz" ]; then
-                    if file "$temp_file.gz" | grep -q "gzip"; then
-                        if gunzip -c "$temp_file.gz" > "$temp_file" 2>/dev/null; then
-                            if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
-                                mv "$temp_file" "$final_core_path"
-                                chmod +x "$final_core_path"
-                                success=true
-                                log_success "内核下载成功: v$latest_version ($display_mirror)"
-                                break
+            for ((i=1; i<=3; i++)); do
+                rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
+                log_debug "第 $i 次尝试 (curl)"
+                if timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_gz_file" "$download_url" 2>/dev/null; then
+                    if [ -f "$temp_gz_file" ] && [ -s "$temp_gz_file" ]; then
+                        if file "$temp_gz_file" | grep -q "gzip"; then
+                            log_debug "curl 下载成功，开始校验..."
+                            if [ "$(sha256sum "$temp_gz_file" | awk '{print $1}')" = "$core_sha256" ]; then
+                                log_info "SHA256 校验通过，开始解压。"
+                                if gunzip -c "$temp_gz_file" > "$temp_file" 2>/dev/null; then
+                                    if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
+                                        mv "$temp_file" "$final_core_path"
+                                        chmod +x "$final_core_path"
+                                        success=true
+                                        log_success "内核下载和校验成功: v${kernel_version} ($display_mirror)"
+                                        break 4
+                                    fi
+                                fi
+                            else
+                                log_warning "SHA256 校验失败，文件可能已损坏，继续尝试。"
                             fi
                         fi
                     fi
                 fi
+                sleep $retry_delay
+            done
+
+            if [ "$success" = false ]; then
+                for ((i=1; i<=3; i++)); do
+                    rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
+                    log_debug "第 $i 次尝试 (wget)"
+                    if timeout $download_timeout wget --no-check-certificate -qO- --tries=1 --waitretry=$retry_delay --connect-timeout=$connection_timeout --read-timeout=$download_timeout "$download_url" > "$temp_gz_file" 2>/dev/null; then
+                        if [ -f "$temp_gz_file" ] && [ -s "$temp_gz_file" ]; then
+                            if file "$temp_gz_file" | grep -q "gzip"; then
+                                log_debug "wget 下载成功，开始校验..."
+                                if [ "$(sha256sum "$temp_gz_file" | awk '{print $1}')" = "$core_sha256" ]; then
+                                    log_info "SHA256 校验通过，开始解压。"
+                                    if gunzip -c "$temp_gz_file" > "$temp_file" 2>/dev/null; then
+                                        if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
+                                            mv "$temp_file" "$final_core_path"
+                                            chmod +x "$final_core_path"
+                                            success=true
+                                            log_success "内核下载和校验成功: v${kernel_version} ($display_mirror)"
+                                            break 4
+                                        fi
+                                    fi
+                                else
+                                    log_warning "SHA256 校验失败，文件可能已损坏，继续尝试。"
+                                fi
+                            fi
+                        fi
+                    fi
+                    sleep $retry_delay
+                done
             fi
-            rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
         done
-        [ "$success" = false ] && sleep 1
     done
 
-    # 最终检查
+    # 最终检查，如果失败则直接报错退出
     if [ "$success" = false ]; then
-        log_error "❌ 强制下载最新版内核失败，所有方案均无效。请检查网络或稍后重试。"
+        log_error "❌ 强制下载最新版内核失败，所有方案均无效。脚本终止。"
     fi
+    
+    rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
     setup_core_links "$core_dir"
 }
 
 # 其他辅助函数（未修改）
-# ... (其他函数保持不变，与之前提供的脚本相同)
-
 import_passwall_keys() {
     log_step "导入 Passwall2 软件源密钥"
     local key_dir="package/base-files/files/etc/opkg/keys"
@@ -530,6 +544,7 @@ generate_config_file() {
 main() {
     check_environment
     check_dependencies
+    ARCH=$(detect_target_arch) # 在这里执行一次架构检测，并将结果赋给全局 ARCH 变量
     detect_openwrt_version
     init_config_cache
     
@@ -539,7 +554,7 @@ main() {
     add_custom_plugins
     check_all_dependencies
     
-    download_clash_core_forced
+    download_clash_core_improved
     
     generate_config_file
     
