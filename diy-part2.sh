@@ -1,11 +1,10 @@
 #!/bin/bash
 #
-# Manus-V1.5: OpenWrt 雲編譯一站式解決方案 (最終優化版)
+# Manus-V1.9: OpenWrt 雲編譯一站式解決方案 (最終完整版)
 #
-# V1.5 更新日誌:
-# 1. 替換插件源: 將 luci-app-partexp 的源從 immortalwrt 更換為 sirpdboy，提高克隆穩定性。
-# 2. 網絡容錯: 沿用 V1.4 的多鏡像輪詢機制，確保在惡劣網絡下也能成功克隆。
-# 3. 權限校驗: 增加對核心文件執行權限的自動校驗和提示。
+# V1.9 更新日誌:
+# 1. 恢復權限檢查: 根據您的要求，在 chmod 命令後恢復了對核心文件和軟鏈接的權限驗證提示。
+# 2. 邏輯完整性: 確保所有文件操作、權限設置和後續驗證的流程完整且順序正確。
 #
 # 使用方法:
 # 1. 將此腳本保存為 manus_build.sh。
@@ -184,12 +183,11 @@ clone_repo() {
         return
     fi
 
-    # 鏡像列表
     local mirrors=(
         "https://ghproxy.com/${repo_url}"
         "https://gitclone.com/${repo_url}"
         "https://github.moeyy.xyz/${repo_url}"
-        "${repo_url}" # 最後嘗試原始鏈接
+        "${repo_url}"
      )
 
     log_info "正在克隆插件: $repo_name"
@@ -217,7 +215,6 @@ setup_plugins() {
     
     clone_repo "https://github.com/vernesong/OpenClash.git"
     clone_repo "https://github.com/xiaorouji/openwrt-passwall2.git"
-    # 使用 sirpdboy 的版本替換 immortalwrt 的版本
     clone_repo "https://github.com/sirpdboy/luci-app-partexp.git"
     
     log_success "所有插件倉庫克隆完成 。"
@@ -251,18 +248,26 @@ setup_openclash_core() {
     local OPENCLASH_CORE_DIR="$CUSTOM_PLUGINS_DIR/luci-app-openclash/root/etc/openclash/core"
     mkdir -p "$OPENCLASH_CORE_DIR"
     
+    # --- 最終正確的操作順序 ---
+    
+    # 1. 移動文件到目標位置
     log_info "正在放置核心文件到 $OPENCLASH_CORE_DIR"
     mv "$temp_bin" "$OPENCLASH_CORE_DIR/clash_meta"
-    chmod +x "$OPENCLASH_CORE_DIR/clash_meta"
-
-    log_info "創建軟鏈接..."
+    
+    # 2. 創建指向已存在文件的軟鏈接
+    log_info "創建軟鏈接 clash -> clash_meta..."
     ln -sf "$OPENCLASH_CORE_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash"
+
+    # 3. 在文件和鏈接都存在後，一次性賦予權限
+    log_info "正在為核心文件和鏈接設置執行權限..."
     chmod +x "$OPENCLASH_CORE_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash"
-    # 權限校驗
-    if [ -x "$OPENCLASH_CORE_DIR/clash_meta" ] && [ -L "$OPENCLASH_CORE_DIR/clash" ]; then
-        log_success "核心文件和軟鏈接權限驗證通過。"
+
+    # 4. 恢復您指定的權限檢查提示
+    # --- 权限检查提示 ---
+    if [ -x "$OPENCLASH_CORE_DIR/clash_meta" ] && [ -x "$OPENCLASH_CORE_DIR/clash" ]; then
+        log_success "核心文件和软链接执行权限验证通过 ✅"
     else
-        log_warning "核心文件或軟鏈接權限驗證失敗，請手動檢查！"
+        log_warning "⚠️ 核心文件或软链接权限验证失败，请手动检查！"
     fi
 
     log_success "OpenClash 的 Mihomo 核心已成功配置！"
@@ -377,7 +382,7 @@ EOF
 # 主執行函數
 # =================================================================
 main() {
-    log_step "Manus-V1.5 編譯準備腳本啟動"
+    log_step "Manus-V1.9 編譯準備腳本啟動"
     
     check_environment_and_deps
     setup_device_config
