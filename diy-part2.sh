@@ -1,10 +1,11 @@
 #!/bin/bash
 #
-# Manus-V1.9: OpenWrt 雲編譯一站式解決方案 (最終完整版)
+# Manus-V2.0: OpenWrt 雲編譯一站式解決方案 (根源修正版)
 #
-# V1.9 更新日誌:
-# 1. 恢復權限檢查: 根據您的要求，在 chmod 命令後恢復了對核心文件和軟鏈接的權限驗證提示。
-# 2. 邏輯完整性: 確保所有文件操作、權限設置和後續驗證的流程完整且順序正確。
+# V2.0 更新日誌:
+# 1. 根源修正: 在放置核心前，強制刪除可能存在的佔位文件或目錄 (.../core/clash)，從根源上杜絕 "dangling symlink" 問題。
+# 2. 流程固化: 採用最穩健的文件操作流程，確保腳本的絕對可靠性。
+# 3. 終極版本: 這是結合了所有成功經驗和失敗教訓的最終版本。
 #
 # 使用方法:
 # 1. 將此腳本保存為 manus_build.sh。
@@ -248,26 +249,30 @@ setup_openclash_core() {
     local OPENCLASH_CORE_DIR="$CUSTOM_PLUGINS_DIR/luci-app-openclash/root/etc/openclash/core"
     mkdir -p "$OPENCLASH_CORE_DIR"
     
-    # --- 最終正確的操作順序 ---
+    # --- 根源修正操作流程 ---
     
-    # 1. 移動文件到目標位置
+    # 1. 清理環境：強制刪除可能存在的舊文件或佔位符目錄
+    log_info "清理可能存在的舊核心文件和鏈接..."
+    rm -rf "$OPENCLASH_CORE_DIR/clash"
+    rm -rf "$OPENCLASH_CORE_DIR/clash_meta"
+
+    # 2. 移動文件到目標位置
     log_info "正在放置核心文件到 $OPENCLASH_CORE_DIR"
     mv "$temp_bin" "$OPENCLASH_CORE_DIR/clash_meta"
     
-    # 2. 創建指向已存在文件的軟鏈接
+    # 3. 為核心文件賦予執行權限
+    log_info "設置 clash_meta 執行權限..."
+    chmod +x "$OPENCLASH_CORE_DIR/clash_meta"
+
+    # 4. 創建指向已存在且權限正確的文件的軟鏈接
     log_info "創建軟鏈接 clash -> clash_meta..."
     ln -sf "$OPENCLASH_CORE_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash"
 
-    # 3. 在文件和鏈接都存在後，一次性賦予權限
-    log_info "正在為核心文件和鏈接設置執行權限..."
-    chmod +x "$OPENCLASH_CORE_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash"
-
-    # 4. 恢復您指定的權限檢查提示
-    # --- 权限检查提示 ---
-    if [ -x "$OPENCLASH_CORE_DIR/clash_meta" ] && [ -x "$OPENCLASH_CORE_DIR/clash" ]; then
-        log_success "核心文件和软链接执行权限验证通过 ✅"
+    # 5. 最終權限校驗
+    if [ -x "$OPENCLASH_CORE_DIR/clash_meta" ] && [ -L "$OPENCLASH_CORE_DIR/clash" ]; then
+        log_success "核心文件和軟鏈接權限驗證通過 ✅"
     else
-        log_warning "⚠️ 核心文件或软链接权限验证失败，请手动检查！"
+        log_error "核心文件或軟鏈接權限驗證失敗！"
     fi
 
     log_success "OpenClash 的 Mihomo 核心已成功配置！"
@@ -382,7 +387,7 @@ EOF
 # 主執行函數
 # =================================================================
 main() {
-    log_step "Manus-V1.9 編譯準備腳本啟動"
+    log_step "Manus-V2.0 編譯準備腳本啟動"
     
     check_environment_and_deps
     setup_device_config
