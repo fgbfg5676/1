@@ -561,7 +561,7 @@ download_core() {
     
     for url in "\${urls[@]}"; do
         log_msg "尝试下载: \$(basename "\$url")"
-        if wget -qO- --connect-timeout=30 --read-timeout=120 "\$url" > "/tmp/core_download.tmp" 2>/dev/null; then
+        if wget -qO- --connect-timeout=30 --read-timeout=60"\$url" > "/tmp/core_download.tmp" 2>/dev/null; then
             if [ -s "/tmp/core_download.tmp" ]; then
                 if echo "\$url" | grep -q "\.gz\$"; then
                     if gunzip -c "/tmp/core_download.tmp" > "\$CORE_FILE.tmp" 2>/dev/null; then
@@ -624,16 +624,24 @@ import_passwall_keys() {
     log_step "导入 Passwall2 软件源密钥"
     local key_dir="package/base-files/files/etc/opkg/keys"
     safe_mkdir "$key_dir"
-    local key_urls=("https://downloads.openwrt.org/snapshots/keys/6243c1c880731018a6251b66789c7785659653d0" "https://github.com/xiaorouji/openwrt-passwall2/raw/main/keys/9a22e228.pub")
+    # 使用 ghproxy.com 镜像作为首选，以提高成功率
+    local key_urls=("https://ghproxy.com/https://downloads.openwrt.org/snapshots/keys/6243c1c880731018a6251b66789c7785659653d0" "https://ghproxy.com/https://github.com/xiaorouji/openwrt-passwall2/raw/main/keys/9a22e228.pub")
+    local success=false
     for url in "${key_urls[@]}"; do
-        local key_file="$key_dir/$(basename "$url")"
-        if ! wget --no-check-certificate -O "$key_file" "$url" 2>/dev/null; then
-            log_warning "密钥下载失败: $url，尝试镜像"
-            if ! wget --no-check-certificate -O "$key_file" "https://ghproxy.com/$url" 2>/dev/null; then log_warning "密钥导入失败（可选）"; continue; fi
+        local key_file="$key_dir/$(basename "$url" | cut -d'?' -f1)"
+        log_info "尝试下载密钥: $(basename "$url" | cut -d'?' -f1)"
+        if wget --no-check-certificate -O "$key_file" --timeout=30 --tries=2 "$url" 2>/dev/null; then
+            chmod 644 "$key_file" 2>/dev/null || true
+            log_success "密钥导入成功: $(basename "$url" | cut -d'?' -f1)"
+            success=true
+            break # 成功后立即退出循环
+        else
+            log_warning "密钥下载失败: $url"
         fi
-        chmod 644 "$key_file" 2>/dev/null || true
-        log_info "密钥导入成功: $(basename "$url")"
     done
+    if [ "$success" = false ]; then
+        log_warning "所有密钥下载尝试失败，但这通常不影响编译。"
+    fi
     log_success "Passwall2 密钥导入完成"
 }
 
