@@ -1,10 +1,11 @@
 #!/bin/bash
 #
-# Manus-V1.3: OpenWrt 雲編譯一站式解決方案 (穩定最終版)
+# Manus-V1.5: OpenWrt 雲編譯一站式解決方案 (最終優化版)
 #
-# V1.3 更新日誌:
-# 1. 修正環境檢查: 移除了對 README.md 文件的不可靠檢查，改為只檢查核心目錄是否存在。
-# 2. 邏輯簡化: 回歸最直接、最穩定的執行流程。
+# V1.5 更新日誌:
+# 1. 替換插件源: 將 luci-app-partexp 的源從 immortalwrt 更換為 sirpdboy，提高克隆穩定性。
+# 2. 網絡容錯: 沿用 V1.4 的多鏡像輪詢機制，確保在惡劣網絡下也能成功克隆。
+# 3. 權限校驗: 增加對核心文件執行權限的自動校驗和提示。
 #
 # 使用方法:
 # 1. 將此腳本保存為 manus_build.sh。
@@ -34,7 +35,6 @@ DOWNLOAD_TIMEOUT=300  # 5 分鐘
 # =================================================================
 check_environment_and_deps() {
     log_step "步驟 1: 檢查環境與依賴工具"
-    # 修正後的檢查：只檢查 'package' 和 'scripts' 這兩個 OpenWrt 源碼的核心目錄
     if [ ! -d "package" ] || [ ! -d "scripts" ]; then
         log_error "腳本必須在 OpenWrt 源碼根目錄下運行。請檢查當前路徑。"
     fi
@@ -172,27 +172,43 @@ EOF
 }
 
 # =================================================================
-# 步驟 3: 集成插件
+# 步驟 3: 集成插件 (增強網絡版)
 # =================================================================
 clone_repo() {
     local repo_url="$1"
     local repo_name=$(basename "$repo_url" .git)
     local target_dir="$CUSTOM_PLUGINS_DIR/$repo_name"
-    local mirrored_url="https://ghproxy.com/$repo_url"
-
+    
     if [ -d "$target_dir" ]; then
-        log_warning "插件 '$repo_name' 已存在 ，跳過克隆。"
+        log_warning "插件 '$repo_name' 已存在，跳過克隆。"
         return
     fi
 
+    # 鏡像列表
+    local mirrors=(
+        "https://ghproxy.com/${repo_url}"
+        "https://gitclone.com/${repo_url}"
+        "https://github.moeyy.xyz/${repo_url}"
+        "${repo_url}" # 最後嘗試原始鏈接
+     )
+
     log_info "正在克隆插件: $repo_name"
-    if ! timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 "$mirrored_url" "$target_dir"; then
-        log_warning "使用鏡像克隆失敗，正在嘗試原始鏈接..."
-        if ! timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 "$repo_url" "$target_dir"; then
-            log_error "克隆插件 '$repo_name' 徹底失敗。"
+    local success=false
+    for mirror in "${mirrors[@]}"; do
+        log_info "嘗試使用鏡像: ${mirror} ..."
+        if timeout "$GIT_CLONE_TIMEOUT" git clone --depth 1 "$mirror" "$target_dir"; then
+            log_success "使用鏡像 '${mirror}' 克隆成功。"
+            success=true
+            break
+        else
+            log_warning "使用鏡像 '${mirror}' 克隆失敗。"
+            rm -rf "$target_dir"
         fi
+    done
+
+    if [ "$success" = false ]; then
+        log_error "克隆插件 '$repo_name' 徹底失敗，所有鏡像均無效。"
     fi
-    log_success "插件 '$repo_name' 克隆成功。"
 }
 
 setup_plugins() {
@@ -201,7 +217,8 @@ setup_plugins() {
     
     clone_repo "https://github.com/vernesong/OpenClash.git"
     clone_repo "https://github.com/xiaorouji/openwrt-passwall2.git"
-    clone_repo "https://github.com/immortalwrt/luci-app-partexp.git"
+    # 使用 sirpdboy 的版本替換 immortalwrt 的版本
+    clone_repo "https://github.com/sirpdboy/luci-app-partexp.git"
     
     log_success "所有插件倉庫克隆完成 。"
 }
@@ -241,6 +258,13 @@ setup_openclash_core() {
     log_info "創建軟鏈接..."
     ln -sf "$OPENCLASH_CORE_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash"
     chmod +x "$OPENCLASH_CORE_DIR/clash_meta" "$OPENCLASH_CORE_DIR/clash"
+    # 權限校驗
+    if [ -x "$OPENCLASH_CORE_DIR/clash_meta" ] && [ -L "$OPENCLASH_CORE_DIR/clash" ]; then
+        log_success "核心文件和軟鏈接權限驗證通過。"
+    else
+        log_warning "核心文件或軟鏈接權限驗證失敗，請手動檢查！"
+    fi
+
     log_success "OpenClash 的 Mihomo 核心已成功配置！"
 }
 
@@ -353,7 +377,7 @@ EOF
 # 主執行函數
 # =================================================================
 main() {
-    log_step "Manus-V1.3 編譯準備腳本啟動"
+    log_step "Manus-V1.5 編譯準備腳本啟動"
     
     check_environment_and_deps
     setup_device_config
