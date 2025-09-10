@@ -9,10 +9,10 @@ export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
 
 # -------------------- 日志函数 --------------------
 log_step() { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 步骤：$*\033[0m"; }
-log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
+log_info() { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $*\033[0m"; }
 log_error() { echo -e "[$(date +'%H:%M:%S')] \033[31m❌ $*\033[0m" >&2; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[32m✅ $*\033[0m"; }
-log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
+log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[33m⚠️  $*\033[0m" >&2; }
 log_debug() { [[ "$DEBUG_MODE" == "true" ]] && echo -e "[$(date +'%H:%M:%S')] \033[90m🐛 $*\033[0m"; }
 
 # -------------------- 全局配置 --------------------
@@ -635,97 +635,74 @@ import_passwall_keys() {
         chmod 644 "$key_file" 2>/dev/null || true
     done
     log_success "Passwall2 密钥导入完成"
-    return 0
 }
 
-fetch_plugin() {
-    local repo="$1" plugin_name="$2" subdir="${3:-.}" deps_layer="$4"
-    local temp_dir="/tmp/${plugin_name}_$(date +%s)_$$ " lock_file="/tmp/.${plugin_name}_lock"
-    log_step "集成插件: $plugin_name"
-    log_info "仓库: $repo"
+add_custom_plugins() {
+    log_step "集成自定义插件"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
-    if [ -d "$CUSTOM_PLUGINS_DIR/$plugin_name/.git" ]; then log_info "$plugin_name 已存在，跳过克隆"; plugin_count=$((plugin_count + 1)); return 0; fi
-    exec 200>"$lock_file"
-    if ! flock -n 200; then log_warning "等待插件锁释放..."; flock 200; fi
-    local cleanup_paths=("feeds/luci/applications/$plugin_name" "feeds/packages/net/$plugin_name" "package/$plugin_name" "$CUSTOM_PLUGINS_DIR/$plugin_name" "$temp_dir")
-    for path in "${cleanup_paths[@]}"; do if [ -d "$path" ]; then rm -rf "$path"; log_info "清理旧文件: $path"; fi; done
-    if ! try_git_mirrors "$repo" "$temp_dir"; then flock -u 200; log_error "克隆失败: $plugin_name"; return 1; fi
-    local source_path="$temp_dir/$subdir"
-    if [ ! -f "$source_path/Makefile" ]; then
-        local found_makefile=$(find "$source_path" -maxdepth 3 -name Makefile -print -quit 2>/dev/null)
-        if [ -n "$found_makefile" ]; then source_path=$(dirname "$found_makefile"); log_info "找到 Makefile: $source_path"; else log_error "未找到 Makefile 在 $source_path"; rm -rf "$temp_dir"; flock -u 200; return 1; fi
-    fi
-    if ! mv "$source_path" "$CUSTOM_PLUGINS_DIR/$plugin_name"; then log_error "移动插件失败: $plugin_name"; rm -rf "$temp_dir"; flock -u 200; return 1; fi
-    rm -rf "$temp_dir"; flock -u 200;
-    
-    add_deps_by_layer "$deps_layer"
-    
-    log_success "$plugin_name 集成完成"; plugin_count=$((plugin_count + 1)); return 0;
-}
-
-# -------------------- 验证机制 --------------------
-verify_filesystem() {
-    local plugin=$1; log_step "验证 $plugin 文件系统";
-    if [ -d "$CUSTOM_PLUGINS_DIR/$plugin" ] && [ -f "$CUSTOM_PLUGINS_DIR/$plugin/Makefile" ]; then log_success "$plugin 目录结构验证通过"; return 0; else log_error "$plugin 验证失败（目录或 Makefile 缺失）"; validation_passed=false; return 1; fi
-}
-
-verify_config_conflicts() {
-    log_step "检查配置冲突"
-    local conflicts=("CONFIG_PACKAGE_dnsmasq CONFIG_PACKAGE_dnsmasq-full" "CONFIG_PACKAGE_iptables-legacy CONFIG_PACKAGE_iptables-nft" "CONFIG_PACKAGE_kmod-ipt-tproxy CONFIG_PACKAGE_kmod-nft-tproxy")
-    for pair in "${conflicts[@]}"; do
-        local a=$(echo "$pair" | awk '{print $1}') b=$(echo "$pair" | awk '{print $2}')
-        if [ -n "${config_cache[$a=y]}" ] && [ -n "${config_cache[$b=y]}" ]; then
-            log_error "配置冲突: $a 和 $b 不能同时启用"
-            if [[ "$a" == *"iptables"* && "$b" == *"nft"* && $IS_DSA ]]; then log_info "自动修复：移除 $a，保留 $b（DSA 模式）"; sed -i "/^$a=y/d" "$CONFIG_CUSTOM"; unset config_cache["$a=y"]; else validation_passed=false; fi
+    local plugins=(
+        "https://github.com/immortalwrt/luci-app-partexp.git"
+        "https://github.com/xiaorouji/openwrt-passwall2.git"
+        "https://github.com/vernesong/OpenClash.git"
+    )
+    for repo in "${plugins[@]}"; do
+        local repo_name=$(basename "$repo" .git)
+        local plugin_path="$CUSTOM_PLUGINS_DIR/$repo_name"
+        log_info "正在处理插件: $repo_name"
+        if [ -d "$plugin_path" ]; then
+            log_warning "插件目录已存在，跳过克隆: $repo_name"
+        else
+            if try_git_mirrors "$repo" "$plugin_path"; then
+                plugin_count=$((plugin_count + 1))
+            else
+                validation_passed=false
+            fi
         fi
     done
-    local deprecated_packages=("CONFIG_PACKAGE_kmod-nf-nathelper-extra=y" "CONFIG_PACKAGE_kmod-qca-nss-drv=y" "CONFIG_PACKAGE_kmod-qca-nss-ecm=y" "CONFIG_PACKAGE_ipq-wifi-mobipromo-cm520-79f=y")
-    for pkg in "${deprecated_packages[@]}"; do
-        if [ -n "${config_cache[$pkg]}" ]; then log_warning "移除过期包配置: $pkg"; sed -i "/^$(echo "$pkg" | sed 's/[[\.*^$()+?{|]/\\&/g')/d" "$CONFIG_CUSTOM" 2>/dev/null || true; unset config_cache["$pkg"]; fi
-    done
-    log_info "配置冲突检查完成"
+    if [ "$validation_passed" = true ]; then log_success "所有插件集成完成（共 $plugin_count 个）"; else log_warning "部分插件集成失败，请检查日志"; fi
 }
 
-# -------------------- 主流程 --------------------
-main() {
-    if [ "$DEBUG_MODE" = "true" ]; then log_info "启用调试模式"; set -x; fi
-    check_environment; check_dependencies; detect_openwrt_version; init_config_cache; setup_device_tree;
-    log_step "强制更新 feeds 仓库"
-    for feed in feeds/*; do if [ -d "$feed/.git" ]; then log_info "正在更新 $feed ..."; (cd "$feed" && git pull); fi; done
-    log_step "更新与安装 feeds"
-    ./scripts/feeds update -a || log_error "feeds 更新失败"
-    ./scripts/feeds install -a || log_error "feeds 安装失败"
-    log_step "添加基础依赖"
+check_all_dependencies() {
+    log_step "检查并添加所有插件依赖"
+    add_deps_by_layer "target"
+    add_deps_by_layer "kernel"
+    add_deps_by_layer "drivers"
+    add_deps_by_layer "network"
+    add_deps_by_layer "openclash"
+    add_deps_by_layer "passwall2"
+    add_deps_by_layer "partexp"
+    log_success "所有依赖检查并添加完成"
+}
+
+generate_config_file() {
+    log_step "生成最终 .config 文件"
+    # 将自动生成的自定义配置追加到主配置
+    cat "$CONFIG_CUSTOM" >> "$CONFIG_FILE"
+    # 清理临时文件
     rm -f "$CONFIG_CUSTOM"
-    add_deps_by_layer "kernel"; add_deps_by_layer "drivers"; add_deps_by_layer "network"; add_deps_by_layer "target";
-    log_step "集成插件"
-    local plugins=(
-        "https://github.com/vernesong/OpenClash.git|luci-app-openclash|luci-app-openclash|openclash"
-        "https://github.com/xiaorouji/openwrt-passwall2.git|luci-app-passwall2|.|passwall2"
-        "https://github.com/sirpdboy/luci-app-partexp.git|luci-app-partexp|.|partexp"
-    )
-    for plugin in "${plugins[@]}"; do IFS='|' read -r repo name subdir deps_layer <<< "$plugin"; if fetch_plugin "$repo" "$name" "$subdir" "$deps_layer"; then true; else log_warning "$name 集成失败，继续其他插件"; fi; done
-    log_step "插件后处理"
-    download_clash_core_improved; import_passwall_keys;
-    log_step "验证插件与配置"
-    verify_filesystem "luci-app-openclash" || true; verify_filesystem "luci-app-passwall2" || true; verify_filesystem "luci-app-partexp" || true;
-    verify_config_conflicts;
-    log_step "生成最终配置"
-    if [ -f "$CONFIG_CUSTOM" ] && [ -s "$CONFIG_CUSTOM" ]; then cat "$CONFIG_CUSTOM" >> "$CONFIG_FILE"; rm -f "$CONFIG_CUSTOM"; log_info "合并自定义配置完成"; fi
-    log_info "清理无效配置项..."
-    if [ -f "$CONFIG_FILE" ]; then local temp_config="/tmp/.config.clean_$$"; cp "$CONFIG_FILE" "$temp_config"; sed -i '/CONFIG_PACKAGE_kmod-nf-nathelper-extra=y/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_ipq-wifi-mobipromo/d' "$temp_config" 2>/dev/null || true; mv "$temp_config" "$CONFIG_FILE"; log_info "配置清理完成"; fi
-    if make defconfig 2>/dev/null; then log_success "配置生成成功"; else log_warning "配置生成有警告，但继续执行"; fi
-    log_info "配置变更摘要:"; if [ -f "$CONFIG_FILE" ]; then grep -E '^CONFIG_(TARGET_|PACKAGE_(luci-app-openclash|luci-app-passwall2|luci-app-partexp|kmod-(tun|ipt|ath10k)|xray-core|sing-box|mihomo))' "$CONFIG_FILE" 2>/dev/null | head -20 || true; fi
-    if [ $plugin_count -gt 0 ]; then
-        log_success "🎉 插件集成完成（成功数量: $plugin_count，架构: $ARCH）"
-        log_info "下一步操作:"
-        log_info "1. [可选] make menuconfig - 进一步自定义配置"
-        log_info "2. make -j$(nproc) V=s - 开始编译"
-        log_info "3. 固件输出目录: bin/targets/ipq40xx/generic/"
-    else
-        log_warning "⚠️ 没有插件成功集成，请检查网络连接和仓库地址"
-        exit 1
-    fi
+    log_success "配置已合并，请运行 'make menuconfig' 和 'make -j$(nproc)' 开始编译"
+}
+
+# -------------------- 主函数 --------------------
+main() {
+    check_environment
+    check_dependencies
+    detect_openwrt_version
+    init_config_cache
+    
+    setup_device_tree
+    
+    import_passwall_keys
+    add_custom_plugins
+    check_all_dependencies
+    
+    # OpenClash内核下载
+    download_clash_core_improved
+    
+    # 将自定义配置合并到主配置
+    generate_config_file
+    
+    log_success "脚本执行完毕！"
 }
 
 main "$@"
