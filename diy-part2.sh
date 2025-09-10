@@ -332,6 +332,7 @@ try_git_mirrors() {
 }
 
 # -------------------- 内核下载函数 (已修改为临时网盘专用) --------------------
+# -------------------- 内核下载函数 (已修复错误处理) --------------------
 download_clash_core_improved() {
     log_step "强制下载最新 OpenClash 内核 (mihomo/clash.meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
@@ -358,7 +359,6 @@ download_clash_core_improved() {
         *) log_error "❌ 不支持的架构: $ARCH。无法进行 SHA256 校验。";;
     esac
 
-    # 定义临时网盘下载链接
     local temp_links=(
         "https://drive.google.com/uc?export=download&id=1Gnk8dGXkUjIfGe9enzH1v1hnVVDVlMY_"
         "https://u.ua/d/Du6sN44/"
@@ -375,24 +375,30 @@ download_clash_core_improved() {
             rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
             
             log_debug "第 $i 次尝试 (curl)"
-            if timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_gz_file" "$link" 2>/dev/null; then
-                if [ -f "$temp_gz_file" ] && [ -s "$temp_gz_file" ]; then
-                    if file "$temp_gz_file" | grep -q "gzip"; then
-                        log_debug "下载成功，开始校验..."
-                        if [ "$(sha256sum "$temp_gz_file" | awk '{print $1}')" = "$core_sha256" ]; then
-                            log_info "SHA256 校验通过，开始解压。"
-                            if gunzip -c "$temp_gz_file" > "$temp_file" 2>/dev/null; then
-                                if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
-                                    mv "$temp_file" "$final_core_path"
-                                    chmod +x "$final_core_path"
-                                    success=true
-                                    log_success "内核下载和校验成功: v${kernel_version} ($display_link)"
-                                    break 4
-                                fi
+            # 在这里使用 'if ! ...' 反转逻辑，避免 set -e 立即退出
+            if ! timeout $download_timeout curl -fsSL --connect-timeout $connection_timeout --max-time $download_timeout --retry 1 --retry-delay $retry_delay --user-agent "OpenWrt-Build-Script/1.0" --location -o "$temp_gz_file" "$link" 2>/dev/null; then
+                log_warning "下载失败，尝试重新连接..."
+                sleep $retry_delay
+                continue # 继续下一次循环尝试
+            fi
+
+            # 下载成功，开始校验
+            if [ -f "$temp_gz_file" ] && [ -s "$temp_gz_file" ]; then
+                if file "$temp_gz_file" | grep -q "gzip"; then
+                    log_debug "下载成功，开始校验..."
+                    if [ "$(sha256sum "$temp_gz_file" | awk '{print $1}')" = "$core_sha256" ]; then
+                        log_info "SHA256 校验通过，开始解压。"
+                        if gunzip -c "$temp_gz_file" > "$temp_file" 2>/dev/null; then
+                            if [ -s "$temp_file" ] && file "$temp_file" | grep -q "ELF.*executable"; then
+                                mv "$temp_file" "$final_core_path"
+                                chmod +x "$final_core_path"
+                                success=true
+                                log_success "内核下载和校验成功: v${kernel_version} ($display_link)"
+                                break 4
                             fi
-                        else
-                            log_warning "SHA256 校验失败，文件可能已损坏，继续尝试。"
                         fi
+                    else
+                        log_warning "SHA256 校验失败，文件可能已损坏，继续尝试。"
                     fi
                 fi
             fi
@@ -400,7 +406,6 @@ download_clash_core_improved() {
         done
     done
 
-    # 最终检查，如果失败则直接报错退出
     if [ "$success" = false ]; then
         log_error "❌ 强制下载最新版内核失败，所有临时网盘方案均无效。脚本终止。"
     fi
@@ -408,7 +413,6 @@ download_clash_core_improved() {
     rm -f "$temp_gz_file" "$temp_file" 2>/dev/null
     setup_core_links "$core_dir"
 }
-
 # -------------------- 其他辅助函数 --------------------
 import_passwall_keys() {
     log_step "导入 Passwall2 软件源密钥"
