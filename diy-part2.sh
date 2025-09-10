@@ -37,12 +37,13 @@ IS_DSA=false
 declare -A config_cache=()
 
 declare -A DEPS=(
-    ["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
-    ["drivers"]="CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y CONFIG_PACKAGE_kmod-ipt-core=y CONFIG_PACKAGE_kmod-ipt-nat=y CONFIG_PACKAGE_kmod-ipt-conntrack=y CONFIG_PACKAGE_kmod-ath10k=y CONFIG_PACKAGE_ath10k-firmware-qca4019=y CONFIG_PACKAGE_kmod-mii=y"
-    ["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
-    ["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_kmod-tun=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_jsonfilter=y CONFIG_PACKAGE_ca-certificates=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_ruby=y CONFIG_PACKAGE_ruby-yaml=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-base=y CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y CONFIG_PACKAGE_iptables-mod-tproxy=y"
-    ["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_tuic-client=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
-    ["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y"
+["kernel"]="CONFIG_KERNEL_IP_TRANSPARENT_PROXY=y CONFIG_KERNEL_NETFILTER=y CONFIG_KERNEL_NF_CONNTRACK=y CONFIG_KERNEL_NF_NAT=y CONFIG_KERNEL_NF_TPROXY=y CONFIG_KERNEL_IP6_NF_IPTABLES=y"
+["drivers"]="CONFIG_PACKAGE_kmod-ubi=y CONFIG_PACKAGE_kmod-ubifs=y CONFIG_PACKAGE_kmod-ipt-core=y CONFIG_PACKAGE_kmod-ipt-nat=y CONFIG_PACKAGE_kmod-ipt-conntrack=y CONFIG_PACKAGE_kmod-ath10k=y CONFIG_PACKAGE_ath10k-firmware-qca4019=y CONFIG_PACKAGE_kmod-mii=y"
+["network"]="CONFIG_PACKAGE_bash=y CONFIG_PACKAGE_wget=y CONFIG_PACKAGE_tcpdump=y CONFIG_PACKAGE_traceroute=y CONFIG_PACKAGE_ss=y CONFIG_PACKAGE_ping=y CONFIG_PACKAGE_dnsmasq-full=y CONFIG_PACKAGE_firewall=y CONFIG_PACKAGE_udhcpc=y CONFIG_BUSYBOX_CONFIG_UDHCPC=y"
+["openclash"]="CONFIG_PACKAGE_luci-app-openclash=y CONFIG_PACKAGE_kmod-tun=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_jsonfilter=y CONFIG_PACKAGE_ca-certificates=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_ruby=y CONFIG_PACKAGE_ruby-yaml=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-base=y CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y CONFIG_PACKAGE_iptables-mod-tproxy=y"
+["passwall2"]="CONFIG_PACKAGE_luci-app-passwall2=y CONFIG_PACKAGE_xray-core=y CONFIG_PACKAGE_sing-box=y CONFIG_PACKAGE_tuic-client=y CONFIG_PACKAGE_chinadns-ng=y CONFIG_PACKAGE_haproxy=y CONFIG_PACKAGE_hysteria=y CONFIG_PACKAGE_v2ray-geoip=y CONFIG_PACKAGE_v2ray-geosite=y CONFIG_PACKAGE_unzip=y CONFIG_PACKAGE_coreutils=y CONFIG_PACKAGE_coreutils-base64=y CONFIG_PACKAGE_coreutils-nohup=y CONFIG_PACKAGE_curl=y CONFIG_PACKAGE_ipset=y CONFIG_PACKAGE_ip-full=y CONFIG_PACKAGE_luci-compat=y CONFIG_PACKAGE_luci-lib-jsonc=y CONFIG_PACKAGE_tcping=y CONFIG_PACKAGE_luci-i18n-passwall2-zh-cn=y CONFIG_PACKAGE_iptables=y CONFIG_PACKAGE_iptables-mod-tproxy=y CONFIG_PACKAGE_iptables-mod-socket=y CONFIG_PACKAGE_kmod-ipt-nat=y"
+["partexp"]="CONFIG_PACKAGE_luci-app-partexp=y CONFIG_PACKAGE_parted=y CONFIG_PACKAGE_lsblk=y CONFIG_PACKAGE_fdisk=y CONFIG_PACKAGE_block-mount=y CONFIG_PACKAGE_kmod-fs-ext4=y CONFIG_PACKAGE_e2fsprogs=y CONFIG_PACKAGE_kmod-usb-storage=y CONFIG_PACKAGE_kmod-scsi-generic=y"
+["target"]="CONFIG_TARGET_ipq40xx=y CONFIG_TARGET_ipq40xx_generic=y CONFIG_TARGET_DEVICE_ipq40xx_generic_DEVICE_mobipromo_cm520-79f=y CONFIG_TARGET_ROOTFS_NO_CHECK_SIZE=y"
 )
 
 DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
@@ -89,6 +90,46 @@ check_dependencies() {
         git config --global https.proxy "$HTTP_PROXY"
     fi
     log_success "依赖工具检查通过"
+}
+
+# 增强的架构检测函数
+detect_target_arch() {
+    local target_arch="armv7"  # 默认值
+    
+    log_info "开始检测目标架构..."
+    
+    # 1. 优先检查 IPQ40xx 平台（这是你的设备）
+    if grep -q "CONFIG_TARGET_ipq40xx" "$CONFIG_FILE" 2>/dev/null; then
+        target_arch="armv7"
+        log_info "✓ 检测到 IPQ40xx 平台 → armv7 架构（CM520-79F 专用）"
+        echo "$target_arch"
+        return 0
+    fi
+    
+    # 2. 检查其他平台
+    if grep -q "CONFIG_TARGET_.*aarch64" "$CONFIG_FILE" 2>/dev/null; then
+        target_arch="arm64"
+        log_info "✓ 检测到 aarch64 平台 → arm64 架构"
+    elif grep -q "CONFIG_TARGET_.*x86_64" "$CONFIG_FILE" 2>/dev/null; then
+        target_arch="amd64"
+        log_info "✓ 检测到 x86_64 平台 → amd64 架构"
+    elif grep -q "CONFIG_TARGET_.*mips.*el" "$CONFIG_FILE" 2>/dev/null; then
+        target_arch="mipsle"
+        log_info "✓ 检测到 mipsel 平台 → mipsle 架构"
+    elif grep -q "CONFIG_TARGET_.*mips" "$CONFIG_FILE" 2>/dev/null; then
+        # 注意：对于 IPQ40xx，即使配置中包含 mips，实际也是 ARM
+        if grep -q "CONFIG_TARGET_ipq" "$CONFIG_FILE" 2>/dev/null; then
+            target_arch="armv7"
+            log_info "✓ IPQ 系列芯片检测 → armv7 架构（覆盖 MIPS 检测）"
+        else
+            target_arch="mips"
+            log_info "✓ 检测到纯 MIPS 平台 → mips 架构"
+        fi
+    else
+        log_warning "⚠ 未明确检测到架构，使用默认 armv7"
+    fi
+    
+    echo "$target_arch"
 }
 
 # -------------------- 版本检测与 DSA 判断 --------------------
@@ -151,60 +192,60 @@ setup_device_tree() {
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/soc/qcom,tcsr.h>
 / {
-	model = "MobiPromo CM520-79F";
-	compatible = "mobipromo,cm520-79f";
-	aliases { led-boot = &led_sys; led-failsafe = &led_sys; led-running = &led_sys; led-upgrade = &led_sys; };
-	chosen { bootargs-append = " ubi.block=0,1 root=/dev/ubiblock0_1"; };
-	soc {
-		rng@22000 { status = "okay"; };
-		mdio@90000 { status = "okay"; pinctrl-0 = <&mdio_pins>; pinctrl-names = "default"; reset-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>; reset-delay-us = <1000>; };
-		ess-psgmii@98000 { status = "okay"; };
-		tcsr@1949000 { compatible = "qcom,tcsr"; reg = <0x1949000 0x100>; qcom,wifi_glb_cfg = <TCSR_WIFI_GLB_CFG>; };
-		tcsr@194b000 { compatible = "qcom,tcsr"; reg = <0x194b000 0x100>; qcom,usb-hsphy-mode-select = <TCSR_USB_HSPHY_HOST_MODE>; };
-		ess_tcsr@1953000 { compatible = "qcom,tcsr"; reg = <0x1953000 0x1000>; qcom,ess-interface-select = <TCSR_ESS_PSGMII>; };
-		tcsr@1957000 { compatible = "qcom,tcsr"; reg = <0x1957000 0x100>; qcom,wifi_noc_memtype_m0_m2 = <TCSR_WIFI_NOC_MEMTYPE_M0_M2>; };
-		usb2@60f8800 { status = "okay"; dwc3@6000000 { #address-cells = <1>; #size-cells = <0>; usb2_port1: port@1 { reg = <1>; #trigger-source-cells = <0>; }; }; };
-		usb3@8af8800 { status = "okay"; dwc3@8a00000 { #address-cells = <1>; #size-cells = <0>; usb3_port1: port@1 { reg = <1>; #trigger-source-cells = <0>; }; usb3_port2: port@2 { reg = <2>; #trigger-source-cells = <0>; }; }; };
-		crypto@8e3a000 { status = "okay"; }; watchdog@b017000 { status = "okay"; }; ess-switch@c000000 { status = "okay"; }; edma@c080000 { status = "okay"; };
-	};
-	led_spi {
-		compatible = "spi-gpio"; #address-cells = <1>; #size-cells = <0>; sck-gpios = <&tlmm 40 GPIO_ACTIVE_HIGH>; mosi-gpios = <&tlmm 36 GPIO_ACTIVE_HIGH>; num-chipselects = <0>;
-		led_gpio: led_gpio@0 { compatible = "fairchild,74hc595"; reg = <0>; gpio-controller; #gpio-cells = <2>; registers-number = <1>; spi-max-frequency = <1000000>; };
-	};
-	leds {
-		compatible = "gpio-leds";
-		usb { label = "blue:usb"; gpios = <&tlmm 10 GPIO_ACTIVE_HIGH>; linux,default-trigger = "usbport"; trigger-sources = <&usb3_port1>, <&usb3_port2>, <&usb2_port1>; };
-		led_sys: can { label = "blue:can"; gpios = <&tlmm 11 GPIO_ACTIVE_HIGH>; };
-		wan { label = "blue:wan"; gpios = <&led_gpio 0 GPIO_ACTIVE_LOW>; };
-		lan1 { label = "blue:lan1"; gpios = <&led_gpio 1 GPIO_ACTIVE_LOW>; };
-		lan2 { label = "blue:lan2"; gpios = <&led_gpio 2 GPIO_ACTIVE_LOW>; };
-		wlan2g { label = "blue:wlan2g"; gpios = <&led_gpio 5 GPIO_ACTIVE_LOW>; linux,default-trigger = "phy0tpt"; };
-		wlan5g { label = "blue:wlan5g"; gpios = <&led_gpio 6 GPIO_ACTIVE_LOW>; linux,default-trigger = "phy1tpt"; };
-	};
-	keys { compatible = "gpio-keys"; reset { label = "reset"; gpios = <&tlmm 18 GPIO_ACTIVE_LOW>; linux,code = <KEY_RESTART>; }; };
+    model = "MobiPromo CM520-79F";
+    compatible = "mobipromo,cm520-79f";
+    aliases { led-boot = &led_sys; led-failsafe = &led_sys; led-running = &led_sys; led-upgrade = &led_sys; };
+    chosen { bootargs-append = " ubi.block=0,1 root=/dev/ubiblock0_1"; };
+    soc {
+        rng@22000 { status = "okay"; };
+        mdio@90000 { status = "okay"; pinctrl-0 = <&mdio_pins>; pinctrl-names = "default"; reset-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>; reset-delay-us = <1000>; };
+        ess-psgmii@98000 { status = "okay"; };
+        tcsr@1949000 { compatible = "qcom,tcsr"; reg = <0x1949000 0x100>; qcom,wifi_glb_cfg = <TCSR_WIFI_GLB_CFG>; };
+        tcsr@194b000 { compatible = "qcom,tcsr"; reg = <0x194b000 0x100>; qcom,usb-hsphy-mode-select = <TCSR_USB_HSPHY_HOST_MODE>; };
+        ess_tcsr@1953000 { compatible = "qcom,tcsr"; reg = <0x1953000 0x1000>; qcom,ess-interface-select = <TCSR_ESS_PSGMII>; };
+        tcsr@1957000 { compatible = "qcom,tcsr"; reg = <0x1957000 0x100>; qcom,wifi_noc_memtype_m0_m2 = <TCSR_WIFI_NOC_MEMTYPE_M0_M2>; };
+        usb2@60f8800 { status = "okay"; dwc3@6000000 { #address-cells = <1>; #size-cells = <0>; usb2_port1: port@1 { reg = <1>; #trigger-source-cells = <0>; }; }; };
+        usb3@8af8800 { status = "okay"; dwc3@8a00000 { #address-cells = <1>; #size-cells = <0>; usb3_port1: port@1 { reg = <1>; #trigger-source-cells = <0>; }; usb3_port2: port@2 { reg = <2>; #trigger-source-cells = <0>; }; }; };
+        crypto@8e3a000 { status = "okay"; }; watchdog@b017000 { status = "okay"; }; ess-switch@c000000 { status = "okay"; }; edma@c080000 { status = "okay"; };
+    };
+    led_spi {
+        compatible = "spi-gpio"; #address-cells = <1>; #size-cells = <0>; sck-gpios = <&tlmm 40 GPIO_ACTIVE_HIGH>; mosi-gpios = <&tlmm 36 GPIO_ACTIVE_HIGH>; num-chipselects = <0>;
+        led_gpio: led_gpio@0 { compatible = "fairchild,74hc595"; reg = <0>; gpio-controller; #gpio-cells = <2>; registers-number = <1>; spi-max-frequency = <1000000>; };
+    };
+    leds {
+        compatible = "gpio-leds";
+        usb { label = "blue:usb"; gpios = <&tlmm 10 GPIO_ACTIVE_HIGH>; linux,default-trigger = "usbport"; trigger-sources = <&usb3_port1>, <&usb3_port2>, <&usb2_port1>; };
+        led_sys: can { label = "blue:can"; gpios = <&tlmm 11 GPIO_ACTIVE_HIGH>; };
+        wan { label = "blue:wan"; gpios = <&led_gpio 0 GPIO_ACTIVE_LOW>; };
+        lan1 { label = "blue:lan1"; gpios = <&led_gpio 1 GPIO_ACTIVE_LOW>; };
+        lan2 { label = "blue:lan2"; gpios = <&led_gpio 2 GPIO_ACTIVE_LOW>; };
+        wlan2g { label = "blue:wlan2g"; gpios = <&led_gpio 5 GPIO_ACTIVE_LOW>; linux,default-trigger = "phy0tpt"; };
+        wlan5g { label = "blue:wlan5g"; gpios = <&led_gpio 6 GPIO_ACTIVE_LOW>; linux,default-trigger = "phy1tpt"; };
+    };
+    keys { compatible = "gpio-keys"; reset { label = "reset"; gpios = <&tlmm 18 GPIO_ACTIVE_LOW>; linux,code = <KEY_RESTART>; }; };
 };
 &blsp_dma { status = "okay"; }; &blsp1_uart1 { status = "okay"; }; &blsp1_uart2 { status = "okay"; }; &cryptobam { status = "okay"; };
 &gmac0 { status = "okay"; nvmem-cells = <&macaddr_art_1006>; nvmem-cell-names = "mac-address"; };
 &gmac1 { status = "okay"; nvmem-cells = <&macaddr_art_5006>; nvmem-cell-names = "mac-address"; };
 &nand {
-	pinctrl-0 = <&nand_pins>; pinctrl-names = "default"; status = "okay";
-	nand@0 {
-		partitions {
-			compatible = "fixed-partitions"; #address-cells = <1>; #size-cells = <1>;
-			partition@0 { label = "Bootloader"; reg = <0x0 0xb00000>; read-only; };
-			art: partition@b00000 {
-				label = "ART"; reg = <0xb00000 0x80000>; read-only; compatible = "nvmem-cells"; #address-cells = <1>; #size-cells = <1>;
-				precal_art_1000: precal@1000 { reg = <0x1000 0x2f20>; }; macaddr_art_1006: macaddr@1006 { reg = <0x1006 0x6>; };
-				precal_art_5000: precal@5000 { reg = <0x5000 0x2f20>; }; macaddr_art_5006: macaddr@5006 { reg = <0x5006 0x6>; };
-			};
-			partition@b80000 { label = "rootfs"; reg = <0xb80000 0x7480000>; };
-		};
-	};
+    pinctrl-0 = <&nand_pins>; pinctrl-names = "default"; status = "okay";
+    nand@0 {
+        partitions {
+            compatible = "fixed-partitions"; #address-cells = <1>; #size-cells = <1>;
+            partition@0 { label = "Bootloader"; reg = <0x0 0xb00000>; read-only; };
+            art: partition@b00000 {
+                label = "ART"; reg = <0xb00000 0x80000>; read-only; compatible = "nvmem-cells"; #address-cells = <1>; #size-cells = <1>;
+                precal_art_1000: precal@1000 { reg = <0x1000 0x2f20>; }; macaddr_art_1006: macaddr@1006 { reg = <0x1006 0x6>; };
+                precal_art_5000: precal@5000 { reg = <0x5000 0x2f20>; }; macaddr_art_5006: macaddr@5006 { reg = <0x5006 0x6>; };
+            };
+            partition@b80000 { label = "rootfs"; reg = <0xb80000 0x7480000>; };
+        };
+    };
 };
 &qpic_bam { status = "okay"; };
 &tlmm {
-	mdio_pins: mdio_pinmux { mux_1 { pins = "gpio6"; function = "mdio"; bias-pull-up; }; mux_2 { pins = "gpio7"; function = "mdc"; bias-pull-up; }; };
-	nand_pins: nand_pins { pullups { pins = "gpio52", "gpio53", "gpio58", "gpio59"; function = "qpic"; bias-pull-up; }; pulldowns { pins = "gpio54", "gpio55", "gpio56", "gpio57", "gpio60", "gpio61", "gpio62", "gpio63", "gpio64", "gpio65", "gpio66", "gpio67", "gpio68", "gpio69"; function = "qpic"; bias-pull-down; }; };
+    mdio_pins: mdio_pinmux { mux_1 { pins = "gpio6"; function = "mdio"; bias-pull-up; }; mux_2 { pins = "gpio7"; function = "mdc"; bias-pull-up; }; };
+    nand_pins: nand_pins { pullups { pins = "gpio52", "gpio53", "gpio58", "gpio59"; function = "qpic"; bias-pull-up; }; pulldowns { pins = "gpio54", "gpio55", "gpio56", "gpio57", "gpio60", "gpio61", "gpio62", "gpio63", "gpio64", "gpio65", "gpio66", "gpio67", "gpio68", "gpio69"; function = "qpic"; bias-pull-down; }; };
 };
 &usb3_ss_phy { status = "okay"; }; &usb3_hs_phy { status = "okay"; }; &usb2_hs_phy { status = "okay"; };
 &wifi0 { status = "okay"; nvmem-cell-names = "pre-calibration"; nvmem-cells = <&precal_art_1000>; qcom,ath10k-calibration-variant = "CM520-79F"; };
@@ -216,7 +257,7 @@ EOF
 #!/bin/sh
 . /lib/functions/system.sh
 ipq40xx_board_detect() {
-	local machine; machine=\$(board_name); case "\$machine" in "mobipromo,cm520-79f") ucidef_set_interface_loopback; ucidef_add_switch "switch0" "0u@eth0" "1:lan" "2:lan" "3:wan"; ucidef_set_interfaces_lan_wan "$LAN_IFACE" "$WAN_IFACE"; ;; esac
+    local machine; machine=\$(board_name); case "\$machine" in "mobipromo,cm520-79f") ucidef_set_interface_loopback; ucidef_add_switch "switch0" "0u@eth0" "1:lan" "2:lan" "3:wan"; ucidef_set_interfaces_lan_wan "$LAN_IFACE" "$WAN_IFACE"; ;; esac
 }
 boot_hook_add preinit_main ipq40xx_board_detect
 EOF
@@ -301,49 +342,32 @@ try_git_mirrors() {
 }
 
 # -------------------- 修复版内核下载函数 --------------------
-# 修正版内核下载函数 - 解决架构匹配和版本下载问题
-download_clash_core() {
+# 改进的内核下载函数（替换原有函数）
+download_clash_core_improved() {
     log_step "云编译环境专用 OpenClash 内核下载 (mihomo/clash.meta)"
     local core_dir="package/base-files/files/etc/openclash/core"
     safe_mkdir "$core_dir"
     
-    # 云编译环境专用配置
-    local download_timeout=180
-    local connection_timeout=30
-    local retry_delay=3
-    local max_mirrors=3
-    
-    # 修正架构匹配逻辑 - 处理 MIPS 架构的特殊情况
-    local target_arch="armv7"
-    if grep -q "CONFIG_TARGET_.*aarch64" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="arm64"
-    elif grep -q "CONFIG_TARGET_.*x86_64" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="amd64"
-    elif grep -q "CONFIG_TARGET_.*mips.*el" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="mipsle"
-    elif grep -q "CONFIG_TARGET_.*mips" "$CONFIG_FILE" 2>/dev/null; then
-        target_arch="mips"
-    elif grep -q "CONFIG_TARGET_ipq40xx" "$CONFIG_FILE" 2>/dev/null; then
-        # IPQ40xx 特殊处理 - 实际是 ARM 架构但经常被识别为 MIPS
-        target_arch="armv7"
-        log_info "IPQ40xx 平台检测，强制使用 armv7 架构"
-    fi
-    
+    # 使用新的架构检测函数
+    local target_arch=$(detect_target_arch)
     log_info "最终确定目标架构: $target_arch"
     
-    # 修正版本列表 - 使用确实存在的版本
+    # 云编译环境优化配置
+    local download_timeout=120  # 进一步缩短超时
+    local connection_timeout=20
+    local retry_delay=2
+    
+    # 精选稳定版本（去掉不存在的版本）
     local kernel_versions=(
-        "1.19.8"   # 最新稳定版
-        "1.18.8"   # LTS 版本
-        "1.18.6"   # 备用版本
-        "1.17.0"   # 兜底版本
-        "1.16.0"   # 更老的兜底版本
+        "1.18.8"    # 验证存在的版本
+        "1.18.6"
+        "1.18.5"
+        "1.17.0"
     )
     
-    # 精简高可用镜像列表
+    # 最可靠的镜像源
     local mirror_prefixes=(
         "https://ghproxy.com/https://github.com"
-        "https://mirror.ghproxy.com/https://github.com"
         "https://github.com"
     )
     
@@ -353,81 +377,46 @@ download_clash_core() {
     
     log_info "开始云环境内核下载流程..."
     
-    # 方法1：尝试获取最新版本（缩短超时时间）
-    local latest_tag=""
-    local api_urls=(
-        "https://ghproxy.com/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-        "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
-    )
+    # 使用预设稳定版本列表，跳过 API 查询
+    log_info "使用预设稳定版本列表，跳过 API 查询"
     
-    for api_url in "${api_urls[@]}"; do
-        log_info "尝试获取最新版本: $(echo "$api_url" | cut -d'/' -f3-4)"
-        if command -v curl >/dev/null 2>&1; then
-            latest_tag=$(timeout 15 curl -fsSL --connect-timeout 8 --max-time 15 \
-                -H "Accept: application/vnd.github.v3+json" \
-                -H "User-Agent: OpenWrt-Build-Script" \
-                "$api_url" 2>/dev/null | \
-                grep -o '"tag_name":[[:space:]]*"[^"]*"' | \
-                sed 's/"tag_name":[[:space:]]*"//;s/"//' | head -1)
-        fi
-        
-        if [ -n "$latest_tag" ] && [[ "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            log_info "成功获取最新版本: $latest_tag"
-            kernel_versions=("${latest_tag#v}" "${kernel_versions[@]}")
-            break
-        fi
-        sleep 1
-    done
-    
-    # 方法2：智能多版本下载策略
+    # 直接开始版本下载循环
     for version in "${kernel_versions[@]}"; do
         if [ "$download_success" = true ]; then break; fi
         
         log_info "尝试下载内核版本: $version (架构: $target_arch)"
         
-        # 修正文件名匹配规则 - 根据实际发布情况调整
+        # 根据架构定义下载路径（使用验证过的路径格式）
         local download_paths=()
         case "$target_arch" in
             "armv7"|"arm")
                 download_paths=(
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-armv7-$version.gz"
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-arm-$version.gz"
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-armv7.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-armv7-v$version.gz"
                     "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7-v$version.gz"
+                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7.tar.gz"
                 )
                 ;;
-            "arm64"|"aarch64")
+            "arm64")
                 download_paths=(
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-arm64-$version.gz"
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-arm64.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-arm64-v$version.gz"
                     "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-arm64-v$version.gz"
                 )
                 ;;
-            "amd64"|"x86_64")
+            "amd64")
                 download_paths=(
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-amd64-$version.gz"
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-amd64.gz"
+                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-amd64-v$version.gz"
                     "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-amd64-v$version.gz"
                 )
                 ;;
             "mips")
                 download_paths=(
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mips-hardfloat-$version.gz"
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mips-$version.gz"
                     "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-hardfloat-v$version.gz"
                     "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-v$version.gz"
                 )
                 ;;
-            "mipsle")
-                download_paths=(
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mipsle-hardfloat-$version.gz"
-                    "/MetaCubeX/mihomo/releases/download/v$version/mihomo-linux-mipsle-$version.gz"
-                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mipsle-hardfloat-v$version.gz"
-                )
-                ;;
         esac
         
-        # 为每个版本尝试所有镜像
+        # 尝试下载
         for path in "${download_paths[@]}"; do
             if [ "$download_success" = true ]; then break; fi
             
@@ -435,44 +424,89 @@ download_clash_core() {
                 if [ "$download_success" = true ]; then break; fi
                 
                 local download_url="${mirror_prefix}${path}"
-                log_info "尝试下载: $(basename "$path") 来源: $(echo "$mirror_prefix" | cut -d'/' -f3)"
+                local display_mirror=$(echo "$mirror_prefix" | sed 's|https://||' | cut -d'/' -f1)
                 
-                # 使用 curl 下载
+                log_info "尝试下载: $(basename "$path") 来源: $display_mirror"
+                
+                # 使用 curl 下载，增加错误处理
                 if command -v curl >/dev/null 2>&1; then
+                    # 清理之前的临时文件
+                    rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
+                    
                     if timeout $download_timeout curl -fsSL \
                         --connect-timeout $connection_timeout \
                         --max-time $download_timeout \
                         --retry 1 --retry-delay $retry_delay \
                         --user-agent "OpenWrt-Build-Script/1.0" \
-                        --header "Accept: application/octet-stream" \
+                        --location \
                         -o "$temp_file.gz" "$download_url" 2>/dev/null; then
                         
-                        # 验证下载文件
+                        # 详细验证下载文件
                         if [ -f "$temp_file.gz" ] && [ -s "$temp_file.gz" ]; then
-                            # 检查文件类型和完整性
-                            if file "$temp_file.gz" 2>/dev/null | grep -q "gzip" && gunzip -t "$temp_file.gz" 2>/dev/null; then
-                                log_info "验证并解压内核文件..."
-                                # 解压缩
-                                if gunzip -c "$temp_file.gz" > "$temp_file" 2>/dev/null; then
-                                    # 验证是否为有效的可执行文件
-                                    if [ -s "$temp_file" ] && file "$temp_file" 2>/dev/null | grep -q "ELF.*executable"; then
-                                        # 移动到最终位置
-                                        if mv "$temp_file" "$final_core_path" 2>/dev/null; then
+                            local file_size=$(stat -c%s "$temp_file.gz" 2>/dev/null || echo 0)
+                            log_debug "下载文件大小: $file_size 字节"
+                            
+                            # 检查文件类型
+                            if file "$temp_file.gz" 2>/dev/null | grep -q "gzip"; then
+                                log_info "验证 gzip 文件完整性..."
+                                if gunzip -t "$temp_file.gz" 2>/dev/null; then
+                                    log_info "解压内核文件..."
+                                    if gunzip -c "$temp_file.gz" > "$temp_file" 2>/dev/null; then
+                                        # 验证解压后的文件
+                                        if [ -s "$temp_file" ]; then
+                                            local uncompressed_size=$(stat -c%s "$temp_file" 2>/dev/null || echo 0)
+                                            log_debug "解压后文件大小: $uncompressed_size 字节"
+                                            
+                                            if file "$temp_file" 2>/dev/null | grep -q "ELF.*executable"; then
+                                                # 成功！移动到最终位置
+                                                if mv "$temp_file" "$final_core_path" 2>/dev/null; then
+                                                    chmod +x "$final_core_path"
+                                                    download_success=true
+                                                    log_success "内核下载成功: v$version ($display_mirror)"
+                                                    log_info "  文件路径: $final_core_path"
+                                                    log_info "  文件大小: $uncompressed_size 字节"
+                                                    break
+                                                fi
+                                            else
+                                                log_warning "文件不是有效的可执行文件"
+                                            fi
+                                        fi
+                                    fi
+                                else
+                                    log_warning "gzip 文件损坏"
+                                fi
+                            elif echo "$path" | grep -q "\.tar\.gz$"; then
+                                # 处理 tar.gz 格式
+                                log_info "处理 tar.gz 格式文件..."
+                                local extract_dir="/tmp/clash_extract_$$"
+                                mkdir -p "$extract_dir"
+                                
+                                if tar -xzf "$temp_file.gz" -C "$extract_dir" 2>/dev/null; then
+                                    local clash_bin=$(find "$extract_dir" -name "clash*" -type f -executable 2>/dev/null | head -1)
+                                    if [ -n "$clash_bin" ] && [ -f "$clash_bin" ]; then
+                                        if file "$clash_bin" | grep -q "ELF.*executable"; then
+                                            mv "$clash_bin" "$final_core_path"
                                             chmod +x "$final_core_path"
                                             download_success=true
-                                            log_success "内核下载成功: v$version ($(echo "$download_url" | cut -d'/' -f3))"
-                                            break
+                                            log_success "tar.gz 内核下载成功: $(basename "$clash_bin")"
                                         fi
                                     fi
                                 fi
+                                rm -rf "$extract_dir"
                             fi
+                        else
+                            log_warning "下载文件为空或不存在"
                         fi
+                    else
+                        log_debug "curl 下载失败: $download_url"
                     fi
                 fi
                 
                 # 清理临时文件
                 rm -f "$temp_file" "$temp_file.gz" 2>/dev/null
-                sleep 1
+                
+                # 短暂延迟
+                [ "$download_success" = false ] && sleep 1
             done
         done
         
@@ -480,198 +514,26 @@ download_clash_core() {
         [ "$download_success" = false ] && sleep 2
     done
     
-    # 方法3：尝试 OpenClash 官方预编译包
-    if [ "$download_success" = false ]; then
-        log_warning "mihomo 下载失败，尝试 OpenClash 官方预编译包..."
-        
-        local openclash_paths=()
-        case "$target_arch" in
-            "armv7"|"arm")
-                openclash_paths=("/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-armv7.tar.gz")
-                ;;
-            "arm64")
-                openclash_paths=("/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-arm64.tar.gz")
-                ;;
-            "amd64")
-                openclash_paths=("/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-amd64.tar.gz")
-                ;;
-            "mips")
-                openclash_paths=(
-                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips-hardfloat.tar.gz"
-                    "/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-mips.tar.gz"
-                )
-                ;;
-        esac
-        
-        for path in "${openclash_paths[@]}"; do
-            if [ "$download_success" = true ]; then break; fi
-            
-            for mirror_prefix in "${mirror_prefixes[@]}"; do
-                if [ "$download_success" = true ]; then break; fi
-                
-                local download_url="${mirror_prefix}${path}"
-                log_info "尝试下载官方预编译包: $(basename "$path")"
-                
-                if timeout $download_timeout curl -fsSL \
-                    --connect-timeout $connection_timeout \
-                    --max-time $download_timeout \
-                    --retry 1 --retry-delay 2 \
-                    -o "$temp_file.tar.gz" "$download_url" 2>/dev/null; then
-                    
-                    if [ -s "$temp_file.tar.gz" ] && file "$temp_file.tar.gz" | grep -q "gzip"; then
-                        local extract_dir="/tmp/clash_extract_$$"
-                        mkdir -p "$extract_dir"
-                        
-                        if tar -xzf "$temp_file.tar.gz" -C "$extract_dir" 2>/dev/null; then
-                            # 查找可执行文件
-                            local clash_bin=$(find "$extract_dir" -name "clash*" -type f -executable 2>/dev/null | head -1)
-                            if [ -n "$clash_bin" ] && [ -f "$clash_bin" ]; then
-                                if file "$clash_bin" | grep -q "ELF.*executable"; then
-                                    mv "$clash_bin" "$final_core_path"
-                                    chmod +x "$final_core_path"
-                                    download_success=true
-                                    log_success "OpenClash 官方包下载成功: $(basename "$clash_bin")"
-                                fi
-                            fi
-                        fi
-                        rm -rf "$extract_dir"
-                    fi
-                    rm -f "$temp_file.tar.gz"
-                fi
-                
-                [ "$download_success" = false ] && sleep 2
-            done
-        done
-    fi
-    
-    # 方法4：创建智能占位符（保持不变）
+    # 如果所有版本都失败，创建智能占位符
     if [ "$download_success" = false ]; then
         log_warning "所有下载尝试失败，创建智能占位符"
-        cat > "$final_core_path" << 'SMART_PLACEHOLDER_EOF'
-#!/bin/sh
-# OpenClash 智能内核占位符 - 云编译版本
-# 此脚本将在路由器首次启动时自动尝试下载内核
-
-CORE_DIR="/etc/openclash/core"
-CORE_FILE="$CORE_DIR/clash_meta"
-LOG_FILE="/tmp/openclash_core_download.log"
-
-log_msg() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$LOG_FILE"
-}
-
-download_core() {
-    log_msg "开始自动下载 OpenClash 内核..."
-    
-    # 检测架构
-    local arch=$(uname -m)
-    case "$arch" in
-        "armv7l"|"armv7") arch="armv7" ;;
-        "aarch64"|"arm64") arch="arm64" ;;
-        "x86_64") arch="amd64" ;;
-        "mips") arch="mips-hardfloat" ;;
-        "mipsel") arch="mipsle-hardfloat" ;;
-        *) arch="armv7" ;;
-    esac
-    
-    # 内核下载地址
-    local urls=(
-        "https://ghproxy.com/https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-linux-$arch.gz"
-        "https://mirror.ghproxy.com/https://github.com/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-$arch.tar.gz"
-        "https://ghproxy.com/https://github.com/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-$arch.tar.gz"
-    )
-    
-    for url in "${urls[@]}"; do
-        log_msg "尝试下载: $(basename "$url")"
-        if wget -qO- --connect-timeout=30 --read-timeout=120 "$url" > "/tmp/core_download.tmp" 2>/dev/null; then
-            if [ -s "/tmp/core_download.tmp" ]; then
-                # 处理 .gz 文件
-                if echo "$url" | grep -q "\.gz$"; then
-                    if gunzip -c "/tmp/core_download.tmp" > "$CORE_FILE.tmp" 2>/dev/null; then
-                        if [ -s "$CORE_FILE.tmp" ] && file "$CORE_FILE.tmp" | grep -q "executable"; then
-                            mv "$CORE_FILE.tmp" "$CORE_FILE"
-                            chmod +x "$CORE_FILE"
-                            log_msg "内核下载成功!"
-                            rm -f "/tmp/core_download.tmp" "$CORE_FILE.tmp"
-                            return 0
-                        fi
-                    fi
-                # 处理 .tar.gz 文件
-                elif echo "$url" | grep -q "\.tar\.gz$"; then
-                    local extract_dir="/tmp/clash_extract"
-                    mkdir -p "$extract_dir"
-                    if tar -xzf "/tmp/core_download.tmp" -C "$extract_dir" 2>/dev/null; then
-                        local clash_bin=$(find "$extract_dir" -name "clash*" -type f -executable | head -1)
-                        if [ -n "$clash_bin" ] && [ -f "$clash_bin" ]; then
-                            mv "$clash_bin" "$CORE_FILE"
-                            chmod +x "$CORE_FILE"
-                            log_msg "内核下载成功!"
-                            rm -rf "$extract_dir" "/tmp/core_download.tmp"
-                            return 0
-                        fi
-                    fi
-                    rm -rf "$extract_dir"
-                fi
-            fi
-        fi
-        rm -f "/tmp/core_download.tmp" "$CORE_FILE.tmp"
-        sleep 3
-    done
-    
-    log_msg "内核下载失败，请手动更新"
-    return 1
-}
-
-# 主逻辑
-if [ ! -f "$CORE_FILE" ] || [ ! -x "$CORE_FILE" ] || [ "$(stat -c%s "$CORE_FILE" 2>/dev/null || echo 0)" -lt 1000 ]; then
-    if [ "$1" = "download" ]; then
-        download_core
-        exit $?
-    else
-        echo "OpenClash 内核需要下载，正在后台处理..."
-        echo "您可以:"
-        echo "1. 等待自动下载完成（约2-5分钟）"
-        echo "2. 手动执行: $0 download"
-        echo "3. 访问 OpenClash 管理页面进行手动更新"
-        
-        # 后台下载
-        nohup sh -c "sleep 30; $0 download" >/dev/null 2>&1 &
-        exit 1
-    fi
-else
-    # 执行实际的内核
-    exec "$CORE_FILE" "$@"
-fi
-SMART_PLACEHOLDER_EOF
-        
-        chmod +x "$final_core_path"
-        log_info "智能占位符创建完成，支持路由器端自动下载"
+        create_smart_placeholder "$final_core_path" "$target_arch"
     fi
     
-    # 创建所有必需的内核文件链接
-    local core_files=("clash" "clash_tun" "clash_meta")
-    for core_file in "${core_files[@]}"; do
-        local core_path="$core_dir/$core_file"
-        if [ "$core_file" != "clash_meta" ] && [ ! -f "$core_path" ]; then
-            ln -sf "./clash_meta" "$core_path" 2>/dev/null || cp "$final_core_path" "$core_path" 2>/dev/null
-            log_info "创建内核链接: $core_file"
-        fi
-    done
+    # 创建必要的链接文件
+    setup_core_links "$core_dir"
     
-    # 清理所有临时文件
-    rm -f "$temp_file" "$temp_file.gz" "$temp_file.tar.gz" 2>/dev/null || true
-    
-    # 最终验证和报告
+    # 最终验证
     if [ -f "$final_core_path" ] && [ -x "$final_core_path" ]; then
-        local file_size=$(stat -f%z "$final_core_path" 2>/dev/null || stat -c%s "$final_core_path" 2>/dev/null || echo "0")
+        local file_size=$(stat -c%s "$final_core_path" 2>/dev/null || echo "0")
         log_info "内核文件信息:"
         log_info "  路径: $final_core_path"
         log_info "  大小: ${file_size} 字节"
         log_info "  架构: $target_arch"
         if [ "$download_success" = true ]; then
-            log_info "  状态: 真实内核文件"
+            log_success "状态: 真实内核文件下载成功"
         else
-            log_info "  状态: 智能占位符（支持自动下载）"
+            log_info "状态: 智能占位符（支持路由器端自动下载）"
         fi
         return 0
     else
@@ -679,11 +541,86 @@ SMART_PLACEHOLDER_EOF
         return 1
     fi
 }
-        
-       
-            
-         
-  
+
+# 智能占位符创建函数
+create_smart_placeholder() {
+    local core_path="$1"
+    local arch="$2"
+    
+    cat > "$core_path" << EOF
+#!/bin/sh
+# OpenClash 智能内核占位符 - 专为 CM520-79F 优化
+# 架构: $arch
+
+CORE_DIR="/etc/openclash/core"
+CORE_FILE="\$CORE_DIR/clash_meta"
+LOG_FILE="/tmp/openclash_core_download.log"
+
+log_msg() {
+    echo "\$(date '+%Y-%m-%d %H:%M:%S') \$1" | tee -a "\$LOG_FILE"
+}
+
+download_core() {
+    log_msg "开始自动下载 OpenClash 内核 (架构: $arch)..."
+    
+    local urls=(
+        "https://ghproxy.com/https://github.com/vernesong/OpenClash/releases/download/Clash.Meta/clash-linux-$arch.tar.gz"
+        "https://mirror.ghproxy.com/https://github.com/MetaCubeX/mihomo/releases/download/v1.18.8/mihomo-linux-$arch-v1.18.8.gz"
+    )
+    
+    for url in "\${urls[@]}"; do
+        log_msg "尝试下载: \$(basename "\$url")"
+        if wget -qO- --connect-timeout=30 --read-timeout=120 "\$url" > "/tmp/core_download.tmp" 2>/dev/null; then
+            if [ -s "/tmp/core_download.tmp" ]; then
+                if echo "\$url" | grep -q "\.gz\$"; then
+                    if gunzip -c "/tmp/core_download.tmp" > "\$CORE_FILE.tmp" 2>/dev/null; then
+                        if [ -s "\$CORE_FILE.tmp" ] && file "\$CORE_FILE.tmp" | grep -q "executable"; then
+                            mv "\$CORE_FILE.tmp" "\$CORE_FILE"
+                            chmod +x "\$CORE_FILE"
+                            log_msg "内核下载成功!"
+                            rm -f "/tmp/core_download.tmp"
+                            return 0
+                        fi
+                    fi
+                elif echo "\$url" | grep -q "\.tar\.gz\$"; then
+                    local extract_dir="/tmp/clash_extract"
+                    mkdir -p "\$extract_dir"
+                    if tar -xzf "/tmp/core_download.tmp" -C "\$extract_dir" 2>/dev/null; then
+                        local clash_bin=\$(find "\$extract_dir" -name "clash*" -type f -executable | head -1)
+                        if [ -n "\$clash_bin" ] && [ -f "\$clash_bin" ]; then
+                            if file "\$clash_bin" | grep -q "ELF.*executable"; then
+                                mv "\$clash_bin" "\$CORE_FILE"
+                                chmod +x "\$CORE_FILE"
+                                log_msg "tar.gz 内核下载成功: \$(basename "\$clash_bin")"
+                                rm -rf "\$extract_dir" "/tmp/core_download.tmp"
+                                return 0
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    done
+    log_msg "所有下载尝试失败!"
+    return 1
+}
+
+setup_core_links() {
+    local core_dir="$1"
+    local file_path_base="$core_dir/clash_meta"
+    local link_name_base="$core_dir/clash"
+    log_info "创建内核文件软链接..."
+    if [ -f "$file_path_base" ]; then
+        if [ ! -f "$link_name_base" ] || [ ! -L "$link_name_base" ]; then
+            ln -s "$file_path_base" "$link_name_base"
+            log_success "clash -> clash_meta 软链接创建成功"
+        fi
+        log_success "内核文件和链接准备就绪"
+    else
+        log_warning "clash_meta 文件不存在，无法创建软链接"
+    fi
+}
+
 import_passwall_keys() {
     log_step "导入 Passwall2 软件源密钥"
     local key_dir="package/base-files/files/etc/opkg/keys"
@@ -703,7 +640,7 @@ import_passwall_keys() {
 
 fetch_plugin() {
     local repo="$1" plugin_name="$2" subdir="${3:-.}" deps_layer="$4"
-    local temp_dir="/tmp/${plugin_name}_$(date +%s)_$" lock_file="/tmp/.${plugin_name}_lock"
+    local temp_dir="/tmp/${plugin_name}_$(date +%s)_$$ " lock_file="/tmp/.${plugin_name}_lock"
     log_step "集成插件: $plugin_name"
     log_info "仓库: $repo"
     safe_mkdir "$CUSTOM_PLUGINS_DIR"
@@ -731,6 +668,7 @@ verify_filesystem() {
     local plugin=$1; log_step "验证 $plugin 文件系统";
     if [ -d "$CUSTOM_PLUGINS_DIR/$plugin" ] && [ -f "$CUSTOM_PLUGINS_DIR/$plugin/Makefile" ]; then log_success "$plugin 目录结构验证通过"; return 0; else log_error "$plugin 验证失败（目录或 Makefile 缺失）"; validation_passed=false; return 1; fi
 }
+
 verify_config_conflicts() {
     log_step "检查配置冲突"
     local conflicts=("CONFIG_PACKAGE_dnsmasq CONFIG_PACKAGE_dnsmasq-full" "CONFIG_PACKAGE_iptables-legacy CONFIG_PACKAGE_iptables-nft" "CONFIG_PACKAGE_kmod-ipt-tproxy CONFIG_PACKAGE_kmod-nft-tproxy")
@@ -768,18 +706,18 @@ main() {
     )
     for plugin in "${plugins[@]}"; do IFS='|' read -r repo name subdir deps_layer <<< "$plugin"; if fetch_plugin "$repo" "$name" "$subdir" "$deps_layer"; then true; else log_warning "$name 集成失败，继续其他插件"; fi; done
     log_step "插件后处理"
-    download_clash_core; import_passwall_keys;
+    download_clash_core_improved; import_passwall_keys;
     log_step "验证插件与配置"
     verify_filesystem "luci-app-openclash" || true; verify_filesystem "luci-app-passwall2" || true; verify_filesystem "luci-app-partexp" || true;
     verify_config_conflicts;
     log_step "生成最终配置"
     if [ -f "$CONFIG_CUSTOM" ] && [ -s "$CONFIG_CUSTOM" ]; then cat "$CONFIG_CUSTOM" >> "$CONFIG_FILE"; rm -f "$CONFIG_CUSTOM"; log_info "合并自定义配置完成"; fi
     log_info "清理无效配置项..."
-    if [ -f "$CONFIG_FILE" ]; then local temp_config="/tmp/.config.clean_$"; cp "$CONFIG_FILE" "$temp_config"; sed -i '/CONFIG_PACKAGE_kmod-nf-nathelper-extra=y/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_ipq-wifi-mobipromo/d' "$temp_config" 2>/dev/null || true; mv "$temp_config" "$CONFIG_FILE"; log_info "配置清理完成"; fi
+    if [ -f "$CONFIG_FILE" ]; then local temp_config="/tmp/.config.clean_$$"; cp "$CONFIG_FILE" "$temp_config"; sed -i '/CONFIG_PACKAGE_kmod-nf-nathelper-extra=y/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_kmod-qca-nss/d' "$temp_config" 2>/dev/null || true; sed -i '/CONFIG_PACKAGE_ipq-wifi-mobipromo/d' "$temp_config" 2>/dev/null || true; mv "$temp_config" "$CONFIG_FILE"; log_info "配置清理完成"; fi
     if make defconfig 2>/dev/null; then log_success "配置生成成功"; else log_warning "配置生成有警告，但继续执行"; fi
-    log_info "配置变更摘要:"; if [ -f "$CONFIG_FILE" ]; then grep -E '^CONFIG_(TARGET_|PACKAGE_(luci-app-openclash|luci-app-passwall2|luci-app-partexp|kmod-(tun|ipt|ath10k)|xray-core|sing-box))' "$CONFIG_FILE" 2>/dev/null | head -20 || true; fi
+    log_info "配置变更摘要:"; if [ -f "$CONFIG_FILE" ]; then grep -E '^CONFIG_(TARGET_|PACKAGE_(luci-app-openclash|luci-app-passwall2|luci-app-partexp|kmod-(tun|ipt|ath10k)|xray-core|sing-box|mihomo))' "$CONFIG_FILE" 2>/dev/null | head -20 || true; fi
     if [ $plugin_count -gt 0 ]; then
-        log_success "🎉 插件集成完成（成功数量: $plugin_count，架构: legacy）"
+        log_success "🎉 插件集成完成（成功数量: $plugin_count，架构: $ARCH）"
         log_info "下一步操作:"
         log_info "1. [可选] make menuconfig - 进一步自定义配置"
         log_info "2. make -j$(nproc) V=s - 开始编译"
@@ -789,4 +727,5 @@ main() {
         exit 1
     fi
 }
+
 main "$@"
