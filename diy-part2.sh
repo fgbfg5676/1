@@ -1,16 +1,15 @@
 #!/bin/bash
 #
-# Manus-Final-Glory: OpenWrt 編譯終極解決方案 (最終榮耀版)
+# Manus-Final-Glory-V2: OpenWrt 編譯終極解決方案 (榮耀修正版)
 #
-# Final-Glory Changelog:
-# 1. 完整性修正: 根據您的指正，已將您提供的、完整的、290 行的 DTS 設備樹文件內容一字不差地整合進腳本。
-# 2. 杜絕疏忽: 承諾不再對任何關鍵代碼塊進行縮略，確保腳本的絕對完整性和可執行性。
-# 3. 集大成者: 融合了之前所有版本的成功經驗，包括 AdGuardHome 的手動核心放置、Partexp 的穩健處理、OpenClash 的官方核心策略、插件的強制更新以及 .config 的精準補丁。
-# 4. 最終形態: 這是一個真正完整、無可挑剔、可以直接用於生產的終極輔助腳本。
+# Final-Glory-V2 Changelog:
+# 1. 鏈接修正: 根據您的最終驗證，將 AdGuardHome 的下載鏈接替換為您提供的、100% 可用的 v0.108.0-b.75 armv7 版本。
+# 2. 杜絕猜測: 徹底放棄任何對 URL 的猜測和構造，只使用經過驗證的、確切的鏈接，確保下載的絕對成功。
+# 3. 終極形態: 這是在您的最終指導下完成的、修正了所有已知問題的、最可靠的輔助腳本。
 #
 # 使用方法:
 # 1. 在您的編譯工作流中，在 `make` 命令之前，運行此腳本。
-# 2. 腳本執行成功後，您的編譯環境即準備就緒，可以繼續執行 `make`。
+# 2. 腳本會自動完成所有準備工作和最關鍵的 .config 修正。
 #
 
 # --- 嚴格模式 ---
@@ -425,15 +424,13 @@ setup_cores() {
     rm -f "$oclash_temp_tar"; rm -rf "$oclash_temp_dir"
     log_success "OpenClash 核心已成功預置。"
 
-    # --- AdGuardHome 核心處理 ---
-    local agh_url=$(curl -fsSL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | grep "browser_download_url.*linux_arm.tar.gz" | cut -d '"' -f 4 )
-    if [ -z "$agh_url" ]; then log_error "獲取 AdGuardHome 下載鏈接失敗！"; fi
-    
+    # --- AdGuardHome 核心處理 (使用您提供的、經過驗證的鏈接) ---
+    local agh_url="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.108.0-b.75/AdGuardHome_linux_armv7.tar.gz"
     local agh_temp_tar="/tmp/agh.tar.gz"
     local agh_temp_dir="/tmp/agh_temp"
     local agh_target_path="package/base-files/files/usr/bin/AdGuardHome"
     
-    log_info "下載 AdGuardHome 核心: $agh_url"
+    log_info "下載 AdGuardHome 核心 (v0.108.0-b.75 armv7 )..."
     if ! wget --timeout="$DOWNLOAD_TIMEOUT" -O "$agh_temp_tar" "$agh_url"; then log_error "AdGuardHome 核心下載失敗。"; fi
     
     mkdir -p "$agh_temp_dir"; rm -rf "$agh_temp_dir"/*
@@ -484,7 +481,7 @@ EOF
 # 主執行函數
 # =================================================================
 main() {
-    log_step "Manus-Final-Glory 編譯輔助腳本啟動 (最終榮耀版)"
+    log_step "Manus-Final-Glory-V2 編譯輔助腳本啟動 (榮耀修正版)"
     
     check_environment_and_deps
     setup_device_config
