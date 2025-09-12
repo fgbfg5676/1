@@ -593,7 +593,7 @@ exorcise_ghost_plugins() {
 }
 
 main() {
-    log_step "Manus-Final-Masterpiece-V21 編譯輔助腳本啟動 (最終傑作-V21)"
+    log_step "Manus-Final-Masterpiece-V22 編譯輔助腳本啟動 (最終傑作-V22)"
     check_environment_and_deps
     setup_device_config
     setup_source_plugins
@@ -616,12 +616,12 @@ main() {
 
     log_step "步驟 8: 生成最終 .config 文件"
     # 為了冪等性，先刪除舊標記，再追加新配置
-    sed -i '/# Manus-Final-Masterpiece-V21 .config Patch/,/# ==================================================/d' .config 2>/dev/null || true
+    sed -i '/# Manus-Final-Masterpiece-V22 .config Patch/,/# ==================================================/d' .config 2>/dev/null || true
     
     cat >> .config <<'EOF'
 
 # ==================================================
-# Manus-Final-Masterpiece-V21 .config Patch
+# Manus-Final-Masterpiece-V22 .config Patch
 # ==================================================
 # Enable our custom files package
 CONFIG_PACKAGE_manus-custom-files=y
@@ -654,8 +654,8 @@ EOF
     make defconfig
     log_success "配置生成完畢 。"
 
-    log_step
-"🎉 全部預處理工作已成功完成！"
+    # --- 最終的成功消息 ---
+    log_step "🎉 全部預處理工作已成功完成！"
     log_info "您的編譯環境已準備就緒，可以繼續執行 'make' 命令了。"
 }
 
