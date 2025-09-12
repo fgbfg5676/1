@@ -1,18 +1,17 @@
 #!/bin/bash
 #
-# Manus-Final-Masterpiece-V13: OpenWrt 編譯終極解決方案 (最終傑作-V13)
+# Manus-Final-Masterpiece-V14: OpenWrt 編譯終極解決方案 (最終傑作-V14)
 #
-# Final-Masterpiece-V13 Changelog:
-# 1. 精準物理刪除: 根據您的最終審查意見，在 feeds install 之後，強制刪除所有可能引入“幽靈依賴”的插件目錄（如 luci-app-samba*, luci-app-cloudflared*），從根源上杜絕任何不想要的包被編譯。
-# 2. 標準 Makefile 補丁: 採納您的權威建議，對 AdGuardHome 的 Makefile 使用 PKG_SOURCE:=" " 和 PKG_MIRROR_HASH:=skip 進行修補，這比 sed/awk 更優雅、更可靠，能完美跳過源碼下載與校驗。
-# 3. 修正核心路徑: 根據您的精確指正，修正了 manus-custom-files 的 Makefile，將 OpenClash Meta 核心安裝到絕對正確的路徑 /etc/openclash/core/clash_meta，確保無縫對接。
-# 4. 規範安裝: 繼續使用 `$(INSTALL_DATA)` 和 `$(INSTALL_BIN)`，確保在任何 Buildroot 環境下的絕對兼容性。
-# 5. 絕對隔離: 繼續沿用創建獨立 `manus-custom-files` 包的權威方案，確保我們預置的核心文件與 OpenWrt 系統的編譯流程完美解耦。
-# 6. 畢業作品: 這是在您的最終指導下完成的、融合了所有正確策略的、最可靠、最優雅、最具人文關懷的輔助腳本。
+# Final-Masterpiece-V14 Changelog:
+# 1. 健壯核心解壓: 重構 OpenClash 核心的處理邏輯。不再對壓縮包內部路徑做任何假設，而是先解壓、再用 `find` 查找，徹底解決因上游打包結構變更導致的 "tar: Not found in archive" 錯誤。
+# 2. 精準物理刪除: 繼續沿用在 feeds install 之後，強制刪除所有可能引入“幽靈依賴”的插件目錄的策略。
+# 3. 標準 Makefile 補丁: 繼續使用 PKG_SOURCE:=" " 和 PKG_MIRROR_HASH:=skip 的標準方案，優雅地阻止 AdGuardHome 核心的下載。
+# 4. 修正核心路徑: 確保 OpenClash Meta 核心被安裝到絕對正確的路徑 /etc/openclash/core/clash_meta。
+# 5. 畢業作品: 這是在您的持續指導和反饋下，不斷完善、趨於完美的編譯輔助腳本。
 #
 # 使用方法:
-# 1. 在您的編譯工作流中，在 `make` 命令之前，運行此腳本。
-# 2. 腳本會自動完成所有準備工作。
+# 1. 將此腳本內容完整複製到您的 `diy-part2.sh` 文件中。
+# 2. 在您的編譯工作流中，在 `make` 命令之前，運行此腳本。
 #
 
 set -euo pipefail
@@ -61,7 +60,7 @@ check_environment_and_deps() {
     if [ ! -d "package" ] || [ ! -d "scripts" ]; then
         log_error "腳本必須在 OpenWrt 源碼根目錄下運行。"
     fi
-    local tools=(git curl wget unzip tar grep sed awk gzip)
+    local tools=(git curl wget unzip tar grep sed awk gzip find)
     local missing=()
     for t in "${tools[@]}"; do
         if ! command -v "$t" >/dev/null 2>&1; then missing+=("$t"); fi
@@ -81,7 +80,6 @@ setup_device_config() {
 
     mkdir -p "$DTS_DIR" "$BOARD_DIR"
     log_info "寫入 DTS 和 board 文件..."
-    # ... (DTS 和 board 文件內容與 V12 相同，此處省略以保持簡潔)
     cat > "$DTS_FILE" <<'EOF'
 /dts-v1/;
 // SPDX-License-Identifier: GPL-2.0-or-later OR MIT
@@ -410,7 +408,7 @@ EOF
 }
 
 patch_makefiles() {
-    log_step "步驟 4: 釜底抽薪 - 修改 Makefile 以阻止核心被覆蓋 (V13 標準版)"
+    log_step "步驟 4: 釜底抽薪 - 修改 Makefile 以阻止核心被覆蓋 (標準版)"
     local adguard_makefile="$CUSTOM_PLUGINS_DIR/luci-app-adguardhome/Makefile"
     
     if [ -f "$adguard_makefile" ]; then
@@ -499,17 +497,26 @@ EOF
     touch "$CUSTOM_FILES_PKG_DIR/files/var/log/AdGuardHome.log"
     log_success "AdGuardHome 核心和配置已放入獨立包 。"
 
-    # --- OpenClash Meta 核心處理 ---
+    # --- OpenClash Meta 核心處理 (V14 健壯版) ---
     local meta_url="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-armv7.tar.gz"
     local meta_temp_tar="$tmpd/clash_meta.tar.gz"
-    
+    local meta_temp_dir="$tmpd/clash_meta_temp"
+
     log_info "下載 OpenClash Meta 內核..."
     if ! download "$meta_url" "$meta_temp_tar"; then log_error "OpenClash Meta 內核下載失敗 。"; fi
-    
-    # V13 修正: 直接將解壓出的 clash 文件放到目標位置
+
+    mkdir -p "$meta_temp_dir"
+    tar -xzf "$meta_temp_tar" -C "$meta_temp_dir" || log_error "OpenClash meta 解壓失敗。"
+
+    local clash_bin
+    clash_bin=$(find "$meta_temp_dir" -type f -name 'clash' | head -n1)
+
+    if [ -z "$clash_bin" ]; then
+        log_error "解壓後未找到 'clash' 核心文件！"
+    fi
+
     mkdir -p "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core"
-    tar -xzf "$meta_temp_tar" -C "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core" --strip-components=1 clash-linux-armv7/clash || log_error "OpenClash meta 解壓失敗。"
-    mv "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash" "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta" || log_error "重命名 clash_meta 核心失敗。"
+    mv "$clash_bin" "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta"
     log_success "OpenClash Meta 核心已放入獨立包。"
 
     # --- OpenClash & Passwall2 IPK ---
@@ -524,7 +531,7 @@ EOF
     unzip -q -o "$pw2_temp_zip" -d "$IPK_REPO_DIR" || log_error "Passwall2 IPK 解壓失敗。"
     log_success "所有 IPK 包已準備就緒。"
 
-    # --- 創建獨立包的 Makefile (V13 修正版) ---
+    # --- 創建獨立包的 Makefile ---
     cat > "$CUSTOM_FILES_PKG_DIR/Makefile" <<'EOF'
 include $(TOPDIR)/rules.mk
 
@@ -555,19 +562,18 @@ define Package/manus-custom-files/install
 	$(INSTALL_DIR) $(1)/var/log
 	$(INSTALL_DATA) ./files/var/log/AdGuardHome.log $(1)/var/log/
 
-	# OpenClash (V13 修正路徑)
+	# OpenClash
 	$(INSTALL_DIR) $(1)/etc/openclash/core
 	$(INSTALL_BIN) ./files/etc/openclash/core/clash_meta $(1)/etc/openclash/core/
 endef
 
 $(eval $(call BuildPackage,manus-custom-files))
 EOF
-    log_success "獨立預置文件包 'manus-custom-files' 創建完成 (V13)。"
+    log_success "獨立預置文件包 'manus-custom-files' 創建完成。"
 }
 
 exorcise_ghost_plugins() {
-    log_step "步驟 6: 物理刪除幽靈插件以絕後患 (V13 精準版)"
-    # 使用 find 結合 -path 和通配符，更靈活地匹配和刪除
+    log_step "步驟 6: 物理刪除幽靈插件以絕後患 (精準版)"
     log_info "正在搜索並刪除指定的幽靈插件目錄..."
     find feeds package -maxdepth 4 -type d \( \
         -path '*/luci-app-samba' -o \
@@ -585,7 +591,7 @@ exorcise_ghost_plugins() {
 }
 
 main() {
-    log_step "Manus-Final-Masterpiece-V13 編譯輔助腳本啟動 (最終傑作-V13)"
+    log_step "Manus-Final-Masterpiece-V14 編譯輔助腳本啟動 (最終傑作-V14)"
     check_environment_and_deps
     setup_device_config
     setup_source_plugins
@@ -593,7 +599,6 @@ main() {
     setup_prebuilt_packages
 
     log_step "步驟 7: 更新 Feeds 並注入本地 IPK 源"
-    # 確保只添加一次本地源
     if ! grep -q "src-link local_ipks" feeds.conf.default; then
         echo "src-link local_ipks file:$(pwd)/$IPK_REPO_DIR" >> feeds.conf.default
         log_info "本地 IPK 源已注入。"
@@ -605,25 +610,46 @@ main() {
     ./scripts/feeds install -a
     log_success "Feeds 更新並安裝完成。"
 
-    # 在 feeds install 之後執行物理刪除，確保萬無一失
     exorcise_ghost_plugins
 
     log_step "步驟 8: 生成最終 .config 文件"
-    # 為了冪等性，先刪除舊標記，再追加新配置
-    sed -i '/# Manus-Final-Masterpiece-V13 .config Patch/,/# ==================================================/d' .config 2>/dev/null || true
+    sed -i '/# Manus-Final-Masterpiece-V14 .config Patch/,/# ==================================================/d' .config 2>/dev/null || true
     
     cat >> .config <<'EOF'
 
 # ==================================================
+# Manus-Final-Masterpiece-V14 .config Patch
+# ==================================================
+# Enable our custom files package
+CONFIG_PACKAGE_manus-custom-files=y
+
+# DNS Fix: Disable all potential DNS hijackers
+CONFIG_PACKAGE_https-dns-proxy=n
+CONFIG_PACKAGE_luci-app-https-dns-proxy=n
+
+# AdGuardHome: Enable LuCI, but disable binary from Makefile
+CONFIG_PACKAGE_luci-app-adguardhome=y
+CONFIG_PACKAGE_luci-app-adguardhome_INCLUDE_binary=n
+CONFIG_PACKAGE_adguardhome=n
+
+# Enable IPK-based apps
+CONFIG_PACKAGE_luci-app-passwall2=y
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_openclash-core=n
+
+# Enable source-based apps
+CONFIG_PACKAGE_luci-app-partexp=y
+
+# Enable Chinese Translations
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y
+# Passwall2 & OpenClash i18n will be installed from their IPKs
+# ==================================================
 EOF
-    # 【【【 關鍵：確保 EOF 獨佔一行 ，且前後沒有任何空格或字符 】】】
     log_success ".config 補丁已應用"
 
     make defconfig
-    log_success "配置生成完畢。"
+    log_success "配置生成完畢 。"
 
     log_step "🎉 全部預處理工作已成功完成！"
-    log_info "您的編譯環境已準備就緒，可以繼續執行 'make' 命令了。"
-}
-
-main "$@"
+    log_info "您的編譯環境已準備就緒，可以繼續執行 'make
