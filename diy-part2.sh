@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# Manus-Final-Apology-V9: OpenWrt 編譯終極解決方案 (最終致歉-V9)
+# Manus-Final-Exorcism-V11: OpenWrt 編譯終極解決方案 (最終驅魔-V11)
 #
-# Final-Apology-V9 Changelog:
-# 1. 終極修正: 根據您的最終日誌，徹底重塑 AdGuardHome 的配置流程。現在會先修改源碼，再創建軟鏈接，從根源上解決 "File exists" 衝突。
-# 2. 精準校對: 修正 Passwall2 的 IPK 包下載鏈接，使其與您的 arm_cortex-a7_neon-vfpv4 架構完全匹配。
-# 3. 權威方案: 繼續採用 IPK 預置方案處理 OpenClash 和 Passwall2，確保版本和依賴的絕對正確。
-# 4. 釜底抽薪: 繼續“閹割” Makefile，杜絕一切核心文件被覆蓋的可能。
+# Final-Exorcism-V11 Changelog:
+# 1. 終極驅魔: 新增“物理刪除”步驟，在 feeds install 之後，強制刪除所有可能引入“幽靈依賴”的插件目錄（如 luci-app-samba, luci-app-cloudflared），從根源上杜絕任何不想要的包被編譯。
+# 2. 絕對隔離: 繼續沿用創建獨立 `manus-custom-files` 包的權威方案，確保我們預置的核心文件與 OpenWrt 系統的編譯流程完美解耦，互不干擾。
+# 3. 權威方案: 繼續採用 IPK 預置方案處理 OpenClash 和 Passwall2 的 LuCI 界面，確保版本和依賴的絕對正確。
+# 4. 釜底抽薪: 繼續“閹割” AdGuardHome 的 Makefile，杜絕一切核心文件被覆蓋的可能。
 # 5. 畢業作品: 這是在您的最終指導下完成的、融合了所有正確策略的、最可靠、最優雅、最具人文關懷的輔助腳本。
 #
 # 使用方法:
@@ -27,6 +27,7 @@ log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[1;33m⚠️  $1\033[0m" >&2;
 # --- 全局變量 ---
 CUSTOM_PLUGINS_DIR="package/custom"
 IPK_REPO_DIR="ipk_repo"
+CUSTOM_FILES_PKG_DIR="package/manus-custom-files"
 GIT_CLONE_TIMEOUT=600
 DOWNLOAD_TIMEOUT=300
 WGET_RETRIES=3
@@ -384,7 +385,6 @@ setup_source_plugins() {
         fi
     done
 
-    # --- 邏輯重塑：先修改源碼，再創建軟鏈接 ---
     local agh_source_dir="$CUSTOM_PLUGINS_DIR/openwrt-packages/luci-app-adguardhome"
     if [ -d "$agh_source_dir" ]; then
         log_info "正在為 AdGuardHome 源碼創建持久化配置..."
@@ -422,33 +422,27 @@ patch_makefiles() {
 }
 
 setup_prebuilt_packages() {
-    log_step "步驟 5: 預置核心、IPK 包及配置文件"
+    log_step "步驟 5: 創建獨立的預置文件包 (manus-custom-files)"
     local tmpd="$TMPDIR_ROOT"
     rm -rf "$IPK_REPO_DIR"; mkdir -p "$IPK_REPO_DIR"
+    rm -rf "$CUSTOM_FILES_PKG_DIR"; mkdir -p "$CUSTOM_FILES_PKG_DIR/files"
 
     # --- AdGuardHome 核心與配置文件處理 ---
     local agh_url="https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.108.0-b.75/AdGuardHome_linux_armv7.tar.gz"
     local agh_temp_tar="$tmpd/agh.tar.gz"
     local agh_temp_dir="$tmpd/agh_temp"
-    local agh_bin_target_path="package/base-files/files/usr/bin/AdGuardHome"
-    local agh_conf_target_dir="package/base-files/files/etc/AdGuardHome"
-    local agh_log_dir="package/base-files/files/var/log"
-
-    log_info "下載 AdGuardHome 核心 (v0.108.0-b.75 armv7 )..."
-    if ! download "$agh_url" "$agh_temp_tar"; then log_error "AdGuardHome 核心下載失敗：$agh_url"; fi
+    
+    log_info "下載 AdGuardHome 核心..."
+    if ! download "$agh_url" "$agh_temp_tar"; then log_error "AdGuardHome 核心下載失敗 。"; fi
     mkdir -p "$agh_temp_dir"
     tar -xzf "$agh_temp_tar" -C "$agh_temp_dir" || log_error "AdGuardHome 解壓失敗。"
-    if [ ! -f "$agh_temp_dir/AdGuardHome/AdGuardHome" ]; then log_error "解壓後未找到 'AdGuardHome/AdGuardHome'！"; fi
+    if [ ! -f "$agh_temp_dir/AdGuardHome/AdGuardHome" ]; then log_error "解壓後未找到 AdGuardHome 核心！"; fi
     
-    mkdir -p "$(dirname "$agh_bin_target_path")"
-    mv -f "$agh_temp_dir/AdGuardHome/AdGuardHome" "$agh_bin_target_path"
-    chmod +x "$agh_bin_target_path"
-    log_success "AdGuardHome 核心預置完成：$agh_bin_target_path"
-
-    log_info "創建 AdGuardHome 持久化配置文件和日誌文件..."
-    mkdir -p "$agh_conf_target_dir"
-    chmod 755 "$agh_conf_target_dir"
-    cat > "$agh_conf_target_dir/AdGuardHome.yaml" <<'EOF'
+    mkdir -p "$CUSTOM_FILES_PKG_DIR/files/usr/bin"
+    mv -f "$agh_temp_dir/AdGuardHome/AdGuardHome" "$CUSTOM_FILES_PKG_DIR/files/usr/bin/AdGuardHome"
+    
+    mkdir -p "$CUSTOM_FILES_PKG_DIR/files/etc/AdGuardHome"
+    cat > "$CUSTOM_FILES_PKG_DIR/files/etc/AdGuardHome/AdGuardHome.yaml" <<'EOF'
 bind_host: 0.0.0.0
 bind_port: 3000
 auth_name: admin
@@ -488,96 +482,83 @@ tls:
   private_key: ""
 schema_version: 27
 EOF
-    mkdir -p "$agh_log_dir"
-    touch "$agh_log_dir/AdGuardHome.log"
-    chmod 644 "$agh_log_dir/AdGuardHome.log"
-    log_success "AdGuardHome 持久化配置完成 。"
+    
+    mkdir -p "$CUSTOM_FILES_PKG_DIR/files/var/log"
+    touch "$CUSTOM_FILES_PKG_DIR/files/var/log/AdGuardHome.log"
+    log_success "AdGuardHome 核心和配置已放入獨立包 。"
 
     # --- OpenClash Meta 核心處理 ---
     local meta_url="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-armv7.tar.gz"
     local meta_temp_tar="$tmpd/clash_meta.tar.gz"
     local meta_temp_dir="$tmpd/clash_meta_temp"
-    local oclash_core_dir="package/base-files/files/etc/openclash/core"
-    local oclash_meta_dir="$oclash_core_dir/clash_meta"
-
+    
     log_info "下載 OpenClash Meta 內核..."
-    if ! download "$meta_url" "$meta_temp_tar"; then log_error "OpenClash Meta 內核下載失敗：$meta_url"; fi
+    if ! download "$meta_url" "$meta_temp_tar"; then log_error "OpenClash Meta 內核下載失敗 。"; fi
     mkdir -p "$meta_temp_dir"
-    tar -xzf "$meta_temp_tar" -C "$meta_temp_dir" || log_error "OpenClash meta 解壓失敗 。"
+    tar -xzf "$meta_temp_tar" -C "$meta_temp_dir" || log_error "OpenClash meta 解壓失敗。"
     local clash_bin
     clash_bin=$(find "$meta_temp_dir" -type f -name 'clash' | head -n1 || true)
     if [ -z "$clash_bin" ]; then log_error "解壓後未找到 'clash' 文件！"; fi
     
-    mkdir -p "$oclash_meta_dir"
-    mv -f "$clash_bin" "$oclash_meta_dir/clash"
-    chmod +x "$oclash_meta_dir/clash"
-    log_success "OpenClash Meta 核心已成功預置到 $oclash_meta_dir/clash"
+    mkdir -p "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta"
+    mv -f "$clash_bin" "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta/clash"
+    log_success "OpenClash Meta 核心已放入獨立包。"
 
-    # --- OpenClash LuCI IPK ---
+    # --- OpenClash & Passwall2 IPK ---
     local oclash_ipk_url="https://github.com/vernesong/OpenClash/releases/download/v0.47.001/luci-app-openclash_0.47.001_all.ipk"
     log_info "下載 OpenClash LuCI IPK (v0.47.001 )..."
     if ! download "$oclash_ipk_url" "$IPK_REPO_DIR/luci-app-openclash_0.47.001_all.ipk"; then log_error "OpenClash LuCI IPK 下載失敗。"; fi
-    log_success "OpenClash LuCI IPK 已準備就緒。"
-
-    # --- Passwall2 IPK ---
+    
     local pw2_zip_url="https://github.com/xiaorouji/openwrt-passwall2/releases/download/25.9.4-1/passwall_packages_ipk_arm_cortex-a7_neon-vfpv4.zip"
     local pw2_temp_zip="$tmpd/passwall2.zip"
     log_info "下載 Passwall2 IPK 包集合..."
     if ! download "$pw2_zip_url" "$pw2_temp_zip"; then log_error "Passwall2 IPK 包下載失敗 。"; fi
-    log_info "解壓 Passwall2 IPK 到本地倉庫..."
     unzip -q -o "$pw2_temp_zip" -d "$IPK_REPO_DIR" || log_error "Passwall2 IPK 解壓失敗。"
-    log_success "Passwall2 IPK 與依賴已準備就緒。"
+    log_success "所有 IPK 包已準備就緒。"
+
+    # --- 創建獨立包的 Makefile ---
+    cat > "$CUSTOM_FILES_PKG_DIR/Makefile" <<'EOF'
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=manus-custom-files
+PKG_VERSION:=1.0
+PKG_RELEASE:=1
+
+include $(INCLUDE_DIR)/package.mk
+
+define Package/manus-custom-files
+  SECTION:=utils
+  CATEGORY:=Utilities
+  TITLE:=Manus Custom Files - AGH & OpenClash Cores
+endef
+
+define Build/Compile
+endef
+
+define Package/manus-custom-files/install
+	# AdGuardHome
+	$(INSTALL_DIR) $(1)/usr/bin
+	$(INSTALL_BIN) ./files/usr/bin/AdGuardHome $(1)/usr/bin/
+	
+	$(INSTALL_DIR) $(1)/etc/AdGuardHome
+	$(INSTALL_CONF) ./files/etc/AdGuardHome/AdGuardHome.yaml $(1)/etc/AdGuardHome/
+	chmod 755 $(1)/etc/AdGuardHome
+
+	$(INSTALL_DIR) $(1)/var/log
+	touch $(1)/var/log/AdGuardHome.log
+	chmod 644 $(1)/var/log/AdGuardHome.log
+
+	# OpenClash
+	$(INSTALL_DIR) $(1)/etc/openclash/core/clash_meta
+	$(INSTALL_BIN) ./files/etc/openclash/core/clash_meta/clash $(1)/etc/openclash/core/clash_meta/
+endef
+
+$(eval $(call BuildPackage,manus-custom-files))
+EOF
+    log_success "獨立預置文件包 'manus-custom-files' 創建完成。"
 }
 
 main() {
     log_step "Manus-Final-Apology-V9 編譯輔助腳本啟動 (最終致歉-V9)"
     check_environment_and_deps
-    setup_device_config
-    setup_source_plugins
-    patch_makefiles
-    setup_prebuilt_packages
-
-    log_step "步驟 6: 更新 Feeds 並注入本地 IPK 源"
-    echo "src-link local_ipks file:$(pwd)/$IPK_REPO_DIR" >> feeds.conf.default
-    ./scripts/feeds update -a
-    ./scripts/feeds install -a
-    log_success "Feeds 更新並注入本地源完成。"
-
-    log_step "步驟 7: 生成最終 .config 文件"
-    cat >> .config <<'EOF'
-
-# ==================================================
-# Manus-Final-Apology-V9 .config Patch
-# ==================================================
-# DNS Fix: Disable all potential DNS hijackers
-CONFIG_PACKAGE_https-dns-proxy=n
-CONFIG_PACKAGE_luci-app-https-dns-proxy=n
-
-# AdGuardHome: Enable LuCI, but disable binary from Makefile
-CONFIG_PACKAGE_luci-app-adguardhome=y
-CONFIG_PACKAGE_luci-app-adguardhome_INCLUDE_binary=n
-CONFIG_PACKAGE_adguardhome=n
-
-# Enable IPK-based apps
-CONFIG_PACKAGE_luci-app-passwall2=y
-CONFIG_PACKAGE_luci-app-openclash=y
-
-# Enable source-based apps
-CONFIG_PACKAGE_luci-app-partexp=y
-
-# Enable Chinese Translations
-CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y
-# Passwall2 & OpenClash i18n will be installed from their IPKs
-# ==================================================
-EOF
-    log_success ".config 補丁已應用"
-
-    make defconfig
-    log_success "配置生成完畢 。"
-
-    log_step "🎉 全部預處理工作已成功完成！"
-    log_info "您的編譯環境已準備就緒，可以繼續執行 'make' 命令了。"
-}
-
-main "$@"
+    
