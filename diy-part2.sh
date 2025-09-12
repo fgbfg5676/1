@@ -613,9 +613,48 @@ main() {
     exorcise_ghost_plugins
 
     log_step "步驟 8: 生成最終 .config 文件"
-    sed -i '/# Manus-Final-_success "Feeds 更新並安裝完成。"
+    # 為了冪等性，先刪除舊標記，再追加新配置
+    sed -i '/# Manus-Final-Masterpiece-V15 .config Patch/,/# ==================================================/d' .config 2>/dev/null || true
+    
+    cat >> .config <<'EOF'
 
-    exorcise_ghost_plugins
+# ==================================================
+# Manus-Final-Masterpiece-V15 .config Patch
+# ==================================================
+# Enable our custom files package
+CONFIG_PACKAGE_manus-custom-files=y
 
-    log_step "步驟 8: 生成最終 .config 文件"
-    sed -i '/# Manus-Final-
+# DNS Fix: Disable all potential DNS hijackers
+CONFIG_PACKAGE_https-dns-proxy=n
+CONFIG_PACKAGE_luci-app-https-dns-proxy=n
+
+# AdGuardHome: Enable LuCI, but disable binary from Makefile
+CONFIG_PACKAGE_luci-app-adguardhome=y
+CONFIG_PACKAGE_luci-app-adguardhome_INCLUDE_binary=n
+CONFIG_PACKAGE_adguardhome=n
+
+# Enable IPK-based apps
+CONFIG_PACKAGE_luci-app-passwall2=y
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_openclash-core=n
+
+# Enable source-based apps
+CONFIG_PACKAGE_luci-app-partexp=y
+
+# Enable Chinese Translations
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y
+# Passwall2 & OpenClash i18n will be installed from their IPKs
+# ==================================================
+EOF
+    log_success ".config 補丁已應用"
+
+    make defconfig
+    log_success "配置生成完畢 。"
+
+    log_step "🎉 全部預處理工作已成功完成！"
+    log_info "您的編譯環境已準備就緒，可以繼續執行 'make' 命令了。"
+}
+
+# --- 腳本執行入口 ---
+main "$@"
