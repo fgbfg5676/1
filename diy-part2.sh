@@ -479,13 +479,15 @@ EOF
     touch "$agh_log_dir/AdGuardHome.log"
     chmod 644 "$agh_log_dir/AdGuardHome.log"
     
-    # 設置 LuCI 插件的默認工作目錄
-    mkdir -p "package/custom/luci-app-adguardhome/root/etc/config"
-    cat > "package/custom/luci-app-adguardhome/root/etc/config/adguardhome" <<'EOF'
+# 設置 LuCI 插件的默認工作目錄
+AGH_CONFIG_DIR="package/custom/luci-app-adguardhome/root/etc/config"
+mkdir -p "$AGH_CONFIG_DIR"
+cat > "$AGH_CONFIG_DIR/adguardhome" <<'EOF'
 config adguardhome 'global'
 	option enabled '1'
 	option workdir '/etc/AdGuardHome'
 EOF
+
     log_success "AdGuardHome 持久化配置完成 。"
 
     # --- OpenClash Meta 核心處理 ---
@@ -515,7 +517,7 @@ EOF
     log_success "OpenClash LuCI IPK 已準備就緒。"
 
     # --- Passwall2 IPK ---
-    local pw2_zip_url="https://github.com/xiaorouji/openwrt-passwall2/releases/download/25.9.4-1/passwall_packages_ipk_arm_cortex-a7.zip"
+    local pw2_zip_url="https://github.com/xiaorouji/openwrt-passwall2/releases/download/25.9.4-1/passwall_packages_ipk_arm_cortex-a7_neon-vfpv4.zip"
     local pw2_temp_zip="$tmpd/passwall2.zip"
     log_info "下載 Passwall2 IPK 包集合..."
     if ! download "$pw2_zip_url" "$pw2_temp_zip"; then log_error "Passwall2 IPK 包下載失敗 。"; fi
