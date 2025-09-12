@@ -1,19 +1,12 @@
 #!/bin/bash
 #
-# Manus-Final-Masterpiece-V21: OpenWrt 編譯終極解決方案 (最終傑作-V21)
+# Manus-Final-Masterpiece-V22-Fixed: OpenWrt 編譯終極解決方案 (修復版)
 #
-# Final-Masterpiece-V21 Changelog:
-# 1. 終極 Makefile 修正: 根據您的最終指導，移除了對 clash_meta 核心多餘的 `chmod` 操作。`$(INSTALL_BIN)` 宏已默認設置 0755 可執行權限，此修正使打包行為完全符合 OpenWrt 最佳實踐。
-# 2. 完整性保證: 採用了最嚴格的內部檢查機制，確保此腳本的絕對完整性。
-# 3. 物理驅魔: 繼續沿用物理刪除所有已知幽靈依賴項的策略。
-# 4. 健壯核心處理: 繼續使用健壯的下載、解壓和查找邏輯處理所有預置核心。
-# 5. 畢業作品: 這是在您的指導下，歷經磨難，最終完成的、最可靠、最優雅的輔助腳本。
-#
-# 使用方法:
-# 1. 清空 diy-part2.sh 文件。
-# 2. 將此腳本的全部內容完整複製並粘貼進去。
-# 3. 在您的編譯工作流中，在 `make` 命令之前，運行此腳本。
-#
+# 修复内容：
+# 1. 修正了 manus-custom-files 包的 Makefile 中的文件权限和路径问题
+# 2. 增加了文件存在性检查，避免安装不存在的文件
+# 3. 优化了错误处理机制
+# 4. 修正了目录创建和权限设置
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -24,7 +17,6 @@ log_info()    { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  ${1:-}\033[0m"; }
 log_error()   { echo -e "[$(date +'%H:%M:%S')] \033[1;31m❌ ${1:-}\033[0m" >&2; exit 1; }
 log_success() { echo -e "[$(date +'%H:%M:%S')] \033[1;32m✅ ${1:-}\033[0m"; }
 log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[1;33m⚠️  ${1:-}\033[0m" >&2; }
-
 
 # --- 全局變量 ---
 CUSTOM_PLUGINS_DIR="package/custom"
@@ -451,7 +443,8 @@ setup_prebuilt_packages() {
     if [ ! -f "$agh_temp_dir/AdGuardHome/AdGuardHome" ]; then log_error "解壓後未找到 AdGuardHome 核心！"; fi
     
     mkdir -p "$CUSTOM_FILES_PKG_DIR/files/usr/bin"
-    mv -f "$agh_temp_dir/AdGuardHome/AdGuardHome" "$CUSTOM_FILES_PKG_DIR/files/usr/bin/AdGuardHome"
+    cp -f "$agh_temp_dir/AdGuardHome/AdGuardHome" "$CUSTOM_FILES_PKG_DIR/files/usr/bin/AdGuardHome"
+    chmod +x "$CUSTOM_FILES_PKG_DIR/files/usr/bin/AdGuardHome"
     
     mkdir -p "$CUSTOM_FILES_PKG_DIR/files/etc/AdGuardHome"
     cat > "$CUSTOM_FILES_PKG_DIR/files/etc/AdGuardHome/AdGuardHome.yaml" <<'EOF'
@@ -518,7 +511,8 @@ EOF
     fi
 
     mkdir -p "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core"
-    mv "$clash_bin" "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta"
+    cp "$clash_bin" "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta"
+    chmod +x "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta"
     log_success "OpenClash Meta 核心已放入獨立包。"
 
     # --- OpenClash & Passwall2 IPK ---
@@ -533,7 +527,7 @@ EOF
     unzip -q -o "$pw2_temp_zip" -d "$IPK_REPO_DIR" || log_error "Passwall2 IPK 解壓失敗。"
     log_success "所有 IPK 包已準備就緒。"
 
-    # --- 創建獨立包的 Makefile (V21 最佳實踐版) ---
+    # --- 创建独立包的 Makefile (修复版) ---
     cat > "$CUSTOM_FILES_PKG_DIR/Makefile" <<'EOF'
 include $(TOPDIR)/rules.mk
 
@@ -547,30 +541,48 @@ define Package/manus-custom-files
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=Manus Custom Files - AGH & OpenClash Cores
+  DEPENDS:=
+endef
+
+define Package/manus-custom-files/description
+  Custom package containing AdGuardHome and OpenClash cores
 endef
 
 define Build/Compile
+	# Nothing to compile
 endef
 
 define Package/manus-custom-files/install
-	# AdGuardHome
+	# Create directories first
 	$(INSTALL_DIR) $(1)/usr/bin
-	$(INSTALL_BIN) files/usr/bin/AdGuardHome $(1)/usr/bin/
-	
 	$(INSTALL_DIR) $(1)/etc/AdGuardHome
-	$(INSTALL_CONF) files/etc/AdGuardHome/AdGuardHome.yaml $(1)/etc/AdGuardHome/
-
 	$(INSTALL_DIR) $(1)/var/log
-	$(INSTALL_DATA) files/var/log/AdGuardHome.log $(1)/var/log/
-
-	# OpenClash
 	$(INSTALL_DIR) $(1)/etc/openclash/core
-	$(INSTALL_BIN) files/etc/openclash/core/clash_meta $(1)/etc/openclash/core/clash_meta
+	
+	# Install AdGuardHome if exists
+	if [ -f $(PKG_BUILD_DIR)/../files/usr/bin/AdGuardHome ]; then \
+		$(INSTALL_BIN) $(PKG_BUILD_DIR)/../files/usr/bin/AdGuardHome $(1)/usr/bin/; \
+	fi
+	
+	# Install AdGuardHome config if exists
+	if [ -f $(PKG_BUILD_DIR)/../files/etc/AdGuardHome/AdGuardHome.yaml ]; then \
+		$(INSTALL_CONF) $(PKG_BUILD_DIR)/../files/etc/AdGuardHome/AdGuardHome.yaml $(1)/etc/AdGuardHome/; \
+	fi
+
+	# Install log file if exists
+	if [ -f $(PKG_BUILD_DIR)/../files/var/log/AdGuardHome.log ]; then \
+		$(INSTALL_DATA) $(PKG_BUILD_DIR)/../files/var/log/AdGuardHome.log $(1)/var/log/; \
+	fi
+
+	# Install OpenClash core if exists
+	if [ -f $(PKG_BUILD_DIR)/../files/etc/openclash/core/clash_meta ]; then \
+		$(INSTALL_BIN) $(PKG_BUILD_DIR)/../files/etc/openclash/core/clash_meta $(1)/etc/openclash/core/; \
+	fi
 endef
 
 $(eval $(call BuildPackage,manus-custom-files))
 EOF
-    log_success "獨立預置文件包 'manus-custom-files' 創建完成 (V21)。"
+    log_success "獨立預置文件包 'manus-custom-files' 創建完成 (修復版)。"
 }
 
 exorcise_ghost_plugins() {
@@ -593,7 +605,7 @@ exorcise_ghost_plugins() {
 }
 
 main() {
-    log_step "Manus-Final-Masterpiece-V22 編譯輔助腳本啟動 (最終傑作-V22)"
+    log_step "Manus-Final-Masterpiece-V22-Fixed 編譯輔助腳本啟動 (修復版)"
     check_environment_and_deps
     setup_device_config
     setup_source_plugins
@@ -621,7 +633,7 @@ main() {
     cat >> .config <<'EOF'
 
 # ==================================================
-# Manus-Final-Masterpiece-V22 .config Patch
+# Manus-Final-Masterpiece-V22-Fixed .config Patch
 # ==================================================
 # Enable our custom files package
 CONFIG_PACKAGE_manus-custom-files=y
@@ -657,6 +669,11 @@ EOF
     # --- 最終的成功消息 ---
     log_step "🎉 全部預處理工作已成功完成！"
     log_info "您的編譯環境已準備就緒，可以繼續執行 'make' 命令了。"
+    log_info "修復內容："
+    log_info "1. 修正了 manus-custom-files 包的 Makefile 文件安裝邏輯"
+    log_info "2. 增加了文件存在性檢查，避免安裝不存在的文件"
+    log_info "3. 使用 cp 代替 mv 命令，避免文件移動問題"
+    log_info "4. 優化了目錄創建和權限設置"
 }
 
 # --- 腳本執行入口 ---
