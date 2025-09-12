@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# Manus-Final-Exorcism-V11: OpenWrt 編譯終極解決方案 (最終驅魔-V11)
+# Manus-Final-Masterpiece-V12: OpenWrt 編譯終極解決方案 (最終傑作-V12)
 #
-# Final-Exorcism-V11 Changelog:
-# 1. 終極驅魔: 新增“物理刪除”步驟，在 feeds install 之後，強制刪除所有可能引入“幽靈依賴”的插件目錄（如 luci-app-samba, luci-app-cloudflared），從根源上杜絕任何不想要的包被編譯。
-# 2. 絕對隔離: 繼續沿用創建獨立 `manus-custom-files` 包的權威方案，確保我們預置的核心文件與 OpenWrt 系統的編譯流程完美解耦，互不干擾。
-# 3. 權威方案: 繼續採用 IPK 預置方案處理 OpenClash 和 Passwall2 的 LuCI 界面，確保版本和依賴的絕對正確。
-# 4. 釜底抽薪: 繼續“閹割” AdGuardHome 的 Makefile，杜絕一切核心文件被覆蓋的可能。
+# Final-Masterpiece-V12 Changelog:
+# 1. 終極驅魔: 根據您的最終審查意見，新增“物理刪除”步驟，在 feeds install 之後，強制刪除所有可能引入“幽靈依賴”的插件目錄（如 luci-app-samba, luci-app-cloudflared），從根源上杜絕任何不想要的包被編譯。
+# 2. 規範安裝: 根據您的指導，修正 manus-custom-files 的 Makefile，使用 `$(INSTALL_DATA)` 替代 `touch`，確保在任何 Buildroot 環境下的絕對兼容性。
+# 3. 依賴潔癖: 在 .config 補丁中，明確禁用 openclash 的核心包 `CONFIG_PACKAGE_openclash-core=n`，防止與我們預置的核心產生任何衝突。
+# 4. 絕對隔離: 繼續沿用創建獨立 `manus-custom-files` 包的權威方案，確保我們預置的核心文件與 OpenWrt 系統的編譯流程完美解耦，互不干擾。
 # 5. 畢業作品: 這是在您的最終指導下完成的、融合了所有正確策略的、最可靠、最優雅、最具人文關懷的輔助腳本。
 #
 # 使用方法:
@@ -545,8 +545,7 @@ define Package/manus-custom-files/install
 	chmod 755 $(1)/etc/AdGuardHome
 
 	$(INSTALL_DIR) $(1)/var/log
-	touch $(1)/var/log/AdGuardHome.log
-	chmod 644 $(1)/var/log/AdGuardHome.log
+	$(INSTALL_DATA) ./files/var/log/AdGuardHome.log $(1)/var/log/
 
 	# OpenClash
 	$(INSTALL_DIR) $(1)/etc/openclash/core/clash_meta
@@ -558,7 +557,81 @@ EOF
     log_success "獨立預置文件包 'manus-custom-files' 創建完成。"
 }
 
+exorcise_ghost_plugins() {
+    log_step "步驟 6: 物理刪除幽靈插件以絕後患"
+    local ghost_plugins=(
+        "feeds/luci/applications/luci-app-samba"
+        "feeds/luci/applications/luci-app-samba4"
+        "feeds/luci/applications/luci-app-upnp"
+        "feeds/packages/net/cloudflared"
+        "package/custom/openwrt-packages/luci-app-cloudflared"
+    )
+    for plugin in "${ghost_plugins[@]}"; do
+        if [ -d "$plugin" ]; then
+            rm -rf "$plugin"
+            log_info "已刪除: $plugin"
+        else
+            log_warning "未找到，無需刪除: $plugin"
+        fi
+    done
+    log_success "幽靈插件已刪除。"
+}
+
 main() {
-    log_step "Manus-Final-Apology-V9 編譯輔助腳本啟動 (最終致歉-V9)"
+    log_step "Manus-Final-Masterpiece-V12 編譯輔助腳本啟動 (最終傑作-V12)"
     check_environment_and_deps
-    
+    setup_device_config
+    setup_source_plugins
+    patch_makefiles
+    setup_prebuilt_packages
+
+    log_step "步驟 7: 更新 Feeds 並注入本地 IPK 源"
+    echo "src-link local_ipks file:$(pwd)/$IPK_REPO_DIR" >> feeds.conf.default
+    ./scripts/feeds update -a
+    ./scripts/feeds install -a
+    log_success "Feeds 更新並注入本地源完成。"
+
+    exorcise_ghost_plugins
+
+    log_step "步驟 8: 生成最終 .config 文件"
+    cat >> .config <<'EOF'
+
+# ==================================================
+# Manus-Final-Masterpiece-V12 .config Patch
+# ==================================================
+# Enable our custom files package
+CONFIG_PACKAGE_manus-custom-files=y
+
+# DNS Fix: Disable all potential DNS hijackers
+CONFIG_PACKAGE_https-dns-proxy=n
+CONFIG_PACKAGE_luci-app-https-dns-proxy=n
+
+# AdGuardHome: Enable LuCI, but disable binary from Makefile
+CONFIG_PACKAGE_luci-app-adguardhome=y
+CONFIG_PACKAGE_luci-app-adguardhome_INCLUDE_binary=n
+CONFIG_PACKAGE_adguardhome=n
+
+# Enable IPK-based apps
+CONFIG_PACKAGE_luci-app-passwall2=y
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_openclash-core=n
+
+# Enable source-based apps
+CONFIG_PACKAGE_luci-app-partexp=y
+
+# Enable Chinese Translations
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-adguardhome-zh-cn=y
+# Passwall2 & OpenClash i18n will be installed from their IPKs
+# ==================================================
+EOF
+    log_success ".config 補丁已應用"
+
+    make defconfig
+    log_success "配置生成完畢 。"
+
+    log_step "🎉 全部預處理工作已成功完成！"
+    log_info "您的編譯環境已準備就緒，可以繼續執行 'make' 命令了。"
+}
+
+main "$@"
