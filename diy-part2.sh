@@ -18,12 +18,13 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# --- 日誌函數 ---
-log_step()    { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 $1\033[0m"; }
-log_info()    { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  $1\033[0m"; }
-log_error()   { echo -e "[$(date +'%H:%M:%S')] \033[1;31m❌ $1\033[0m" >&2; exit 1; }
-log_success() { echo -e "[$(date +'%H:%M:%S')] \033[1;32m✅ $1\033[0m"; }
-log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[1;33m⚠️  $1\033[0m" >&2; }
+# --- 日誌函數 (V22 健壯版) ---
+log_step()    { echo -e "\n[$(date +'%H:%M:%S')] \033[1;36m📝 ${1:-}\033[0m"; }
+log_info()    { echo -e "[$(date +'%H:%M:%S')] \033[34mℹ️  ${1:-}\033[0m"; }
+log_error()   { echo -e "[$(date +'%H:%M:%S')] \033[1;31m❌ ${1:-}\033[0m" >&2; exit 1; }
+log_success() { echo -e "[$(date +'%H:%M:%S')] \033[1;32m✅ ${1:-}\033[0m"; }
+log_warning() { echo -e "[$(date +'%H:%M:%S')] \033[1;33m⚠️  ${1:-}\033[0m" >&2; }
+
 
 # --- 全局變量 ---
 CUSTOM_PLUGINS_DIR="package/custom"
