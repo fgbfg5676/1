@@ -1,22 +1,17 @@
 #!/bin/bash
 #
-# Manus-Final-Glory: OpenWrt 編譯終極解決方案 (最終榮耀版)
+# Manus-Final-Triumph: OpenWrt 編譯終極解決方案 (最終凱旋版)
 #
-# 基於您認可的“改良版”設計，補齊所有內容，可直接執行。
-#
-# Final-Glory Changelog:
-# 1. 絕對完整: 補齊了之前省略的所有 DTS 設備樹內容，確保腳本的完整性和可直接執行性。
-# 2. 終極健壯: 採用您設計的 mktemp/trap 安全機制、curl/wget 降級重試下載、以及 Makefile 的智能修改策略。
-# 3. 精準打擊: 沿用經過驗證的 OpenClash Meta 核心預置方案，並徹底放棄 Passwall2 的源碼編譯，改為預置您指定的官方 IPK 包。
-# 4. 釜底抽薪: 通過修改 Makefile 和 .config 補丁，徹底杜絕了核心文件被覆蓋和“DNS死亡循環”的問題。
-# 5. 畢業作品: 這是在您的最終指導下完成的、修正了所有已知問題的、最可靠的輔助腳本。
+# Final-Triumph Changelog:
+# 1. 終極啟示: 根據您的最終指導，採用了最優的執行順序：先更新 feeds，再應用 .config 補丁，最後 make defconfig，確保配置的最高優先級。
+# 2. 權威方案: 徹底放棄 Passwall2 的源碼編譯和線下安裝，改為將本地 IPK 目錄註冊為一個 feed 源，讓編譯系統原生、優雅地處理。
+# 3. 釜底抽薪: 採用您優化後的正則表達式，更徹底地“閹割” Makefile，杜絕一切核心文件被覆蓋的可能。
+# 4. 精準打擊: 繼續沿用經過驗證的 OpenClash Meta 核心和 AdGuardHome 核心的預置方案。
+# 5. 畢業作品: 這是在您的最終指導下完成的、融合了所有正確策略的、最可靠、最優雅的輔助腳本。
 #
 # 使用方法:
-# 1. 將此腳本保存為 manus_build.sh。
-# 2. 放置於 OpenWrt 源碼根目錄下。
-# 3. 執行 chmod +x manus_build.sh。
-# 4. 執行 ./manus_build.sh。
-# 5. 腳本成功執行後，您的編譯環境即準備就緒，可以繼續執行 'make' 命令。
+# 1. 在您的編譯工作流中，在 `make` 命令之前，運行此腳本。
+# 2. 腳本會自動完成所有準備工作，包括最關鍵的 Makefile 修改和 .config 生成。
 #
 
 set -euo pipefail
@@ -77,7 +72,7 @@ check_environment_and_deps() {
 }
 
 setup_device_config() {
-    log_step "步驟 2: 配置 CM520-79F 專用設備文件 (完整版)"
+    log_step "步驟 2: 配置 CM520-79F 專用設備文件"
     local DTS_DIR="target/linux/ipq40xx/files/arch/arm/boot/dts"
     local DTS_FILE="$DTS_DIR/qcom-ipq4019-cm520-79f.dts"
     local BOARD_DIR="target/linux/ipq40xx/base-files/etc/board.d"
@@ -410,7 +405,7 @@ patch_makefiles() {
     if [ -f "$adguard_makefile" ]; then
         log_info "正在修改 AdGuardHome Makefile: $adguard_makefile"
         sed -i -E 's/^([[:space:]]*)(PKG_SOURCE_URL|PKG_SOURCE_VERSION|PKG_HASH)/\1#\2/' "$adguard_makefile" || true
-        awk 'BEGIN{inblock=0} /call Build\/Prepare/ {inblock=1} { if(inblock && ($0 ~ /tar |mv |wget |curl |unzip |install /)) { if(substr($0,1,1)!="#") print "#" $0; else print $0 } else print $0 } /call Build\/Install/ { inblock=0 }' "$adguard_makefile" > "${TMPDIR_ROOT}/adguard.mk.tmp" && mv "${TMPDIR_ROOT}/adguard.mk.tmp" "$adguard_makefile"
+        awk 'BEGIN{inblock=0} /call Build\/Prepare/ {inblock=1} { if(inblock && ($0 ~ /tar |mv |wget |curl |unzip |\$\(INSTALL/)) { if(substr($0,1,1)!="#") print "#" $0; else print $0 } else print $0 } /call Build\/Install/ { inblock=0 }' "$adguard_makefile" > "${TMPDIR_ROOT}/adguard.mk.tmp" && mv "${TMPDIR_ROOT}/adguard.mk.tmp" "$adguard_makefile"
         log_success "AdGuardHome Makefile 修改成功。"
     else
         log_warning "未找到 AdGuardHome Makefile，跳過修改。"
@@ -418,7 +413,7 @@ patch_makefiles() {
 
     if [ -n "$openclash_makefile" ] && [ -f "$openclash_makefile" ]; then
         log_info "正在修改 OpenClash Makefile: $openclash_makefile"
-        awk '{ if(($0 ~ /wget |tar |mv |install |unzip /) && substr($0,1,1)!="#") { print "#" $0 } else print $0 }' "$openclash_makefile" > "${TMPDIR_ROOT}/openclash.mk.tmp" && mv "${TMPDIR_ROOT}/openclash.mk.tmp" "$openclash_makefile"
+        awk '{ if(($0 ~ /wget |tar |mv |install |unzip |\$\(INSTALL/) && substr($0,1,1)!="#") { print "#" $0 } else print $0 }' "$openclash_makefile" > "${TMPDIR_ROOT}/openclash.mk.tmp" && mv "${TMPDIR_ROOT}/openclash.mk.tmp" "$openclash_makefile"
         log_success "OpenClash Makefile 修改成功。"
     else
         log_warning "未找到 OpenClash Makefile，跳過修改。"
@@ -487,48 +482,57 @@ setup_prebuilt_packages() {
     log_success "Passwall2 IPK 與依賴已準備就緒: $IPK_REPO_DIR"
 }
 
-generate_patch_config() {
-    log_step "步驟 6: 生成最終 .config 補丁文件"
-    local CONFIG_PATCH_FILE=".config.patch.tmp"
-    cat > "$CONFIG_PATCH_FILE" <<'EOF'
-# ==================================================
-# Manus-Final-Glory .config Patch
-# ==================================================
-CONFIG_PACKAGE_https-dns-proxy=n
-CONFIG_PACKAGE_luci-app-https-dns-proxy=n
-CONFIG_PACKAGE_luci-app-adguardhome=y
-CONFIG_PACKAGE_luci-app-adguardhome_INCLUDE_binary=n
-CONFIG_PACKAGE_adguardhome=n
-CONFIG_PACKAGE_luci-app-passwall2=n
-CONFIG_PACKAGE_luci-app-openclash=y
-CONFIG_PACKAGE_luci-app-partexp=y
-CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
-CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y
-# ==================================================
-EOF
-    cat "$CONFIG_PATCH_FILE" >> .config
-    rm -f "$CONFIG_PATCH_FILE"
-    log_success ".config 補丁已應用"
-}
-
-main( ) {
-    log_step "Manus-Final-Glory 編譯輔助腳本啟動 (最終榮耀版)"
+main() {
+    log_step "Manus-Final-Triumph 編譯輔助腳本啟動 (最終凱旋版)"
     check_environment_and_deps
     setup_device_config
     setup_source_plugins
     patch_makefiles
     setup_prebuilt_packages
-    generate_patch_config
 
-    log_step "更新 Feeds 並生成最終配置..."
+    log_step "步驟 6: 更新 Feeds 並注入本地 IPK 源"
+    # 注入本地 IPK 倉庫作為 feed 源
+    echo "src-link local_passwall2 file:$(pwd)/$IPK_REPO_DIR" >> feeds.conf.default
     ./scripts/feeds update -a
     ./scripts/feeds install -a
+    log_success "Feeds 更新並注入本地源完成。"
+
+    log_step "步驟 7: 生成最終 .config 文件"
+    # 應用最終的補丁
+    cat >> .config <<'EOF'
+
+# ==================================================
+# Manus-Final-Triumph .config Patch
+# ==================================================
+# DNS Fix: Disable all potential DNS hijackers
+CONFIG_PACKAGE_https-dns-proxy=n
+CONFIG_PACKAGE_luci-app-https-dns-proxy=n
+
+# AdGuardHome: Enable LuCI, but ensure binary download is disabled
+CONFIG_PACKAGE_luci-app-adguardhome=y
+CONFIG_PACKAGE_luci-app-adguardhome_INCLUDE_binary=n
+CONFIG_PACKAGE_adguardhome=n
+
+# Passwall2: Enable it, it will be installed from our local IPK feed
+CONFIG_PACKAGE_luci-app-passwall2=y
+
+# Enable other core apps
+CONFIG_PACKAGE_luci-app-openclash=y
+CONFIG_PACKAGE_luci-app-partexp=y
+
+# Enable Chinese Translations
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-openclash-zh-cn=y
+# ==================================================
+EOF
+    log_success ".config 補丁已應用"
+
+    # 執行 make defconfig 來讓所有配置生效
     make defconfig
-    log_success "配置生成完畢。"
+    log_success "配置生成完畢 。"
 
     log_step "🎉 全部預處理工作已成功完成！"
-    log_info "請檢查 package/custom 中的插件與 package/base-files/files/usr/bin/AdGuardHome 是否存在。"
-    log_info "接下來你可以執行： make -j\$(nproc)"
+    log_info "您的編譯環境已準備就緒，可以繼續執行 'make' 命令了。"
 }
 
 main "$@"
