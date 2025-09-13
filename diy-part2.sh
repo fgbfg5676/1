@@ -426,7 +426,7 @@ patch_makefiles() {
 }
 
 setup_prebuilt_packages() {
-    log_step "步驟 5: 創建獨立的預置文件包 (manus-custom-files)"
+    log_step "步驟 5: 創建獨立的預置文件包 (manus-custom-files) - 修復版"
     local tmpd="$TMPDIR_ROOT"
     rm -rf "$IPK_REPO_DIR"; mkdir -p "$IPK_REPO_DIR"
     rm -rf "$CUSTOM_FILES_PKG_DIR"; mkdir -p "$CUSTOM_FILES_PKG_DIR/files"
@@ -527,7 +527,7 @@ EOF
     unzip -q -o "$pw2_temp_zip" -d "$IPK_REPO_DIR" || log_error "Passwall2 IPK 解壓失敗。"
     log_success "所有 IPK 包已準備就緒。"
 
-    # --- 创建独立包的 Makefile (修复版) ---
+    # --- 创建独立包的 Makefile (进一步修复版) ---
     cat > "$CUSTOM_FILES_PKG_DIR/Makefile" <<'EOF'
 include $(TOPDIR)/rules.mk
 
@@ -548,6 +548,11 @@ define Package/manus-custom-files/description
   Custom package containing AdGuardHome and OpenClash cores
 endef
 
+define Build/Prepare
+	# Create build directory
+	mkdir -p $(PKG_BUILD_DIR)
+endef
+
 define Build/Compile
 	# Nothing to compile
 endef
@@ -559,30 +564,51 @@ define Package/manus-custom-files/install
 	$(INSTALL_DIR) $(1)/var/log
 	$(INSTALL_DIR) $(1)/etc/openclash/core
 	
-	# Install AdGuardHome if exists
-	if [ -f $(PKG_BUILD_DIR)/../files/usr/bin/AdGuardHome ]; then \
-		$(INSTALL_BIN) $(PKG_BUILD_DIR)/../files/usr/bin/AdGuardHome $(1)/usr/bin/; \
-	fi
+	# Get the correct source directory (parent of the package directory)
+	$(eval PACKAGE_DIR := $(realpath $(CURDIR)))
 	
-	# Install AdGuardHome config if exists
-	if [ -f $(PKG_BUILD_DIR)/../files/etc/AdGuardHome/AdGuardHome.yaml ]; then \
-		$(INSTALL_CONF) $(PKG_BUILD_DIR)/../files/etc/AdGuardHome/AdGuardHome.yaml $(1)/etc/AdGuardHome/; \
-	fi
-
+	# Install AdGuardHome binary if exists
+	[ ! -f $(PACKAGE_DIR)/files/usr/bin/AdGuardHome ] || \
+		$(INSTALL_BIN) $(PACKAGE_DIR)/files/usr/bin/AdGuardHome $(1)/usr/bin/
+	
+	# Install AdGuardHome config if exists  
+	[ ! -f $(PACKAGE_DIR)/files/etc/AdGuardHome/AdGuardHome.yaml ] || \
+		$(INSTALL_CONF) $(PACKAGE_DIR)/files/etc/AdGuardHome/AdGuardHome.yaml $(1)/etc/AdGuardHome/
+	
 	# Install log file if exists
-	if [ -f $(PKG_BUILD_DIR)/../files/var/log/AdGuardHome.log ]; then \
-		$(INSTALL_DATA) $(PKG_BUILD_DIR)/../files/var/log/AdGuardHome.log $(1)/var/log/; \
-	fi
-
+	[ ! -f $(PACKAGE_DIR)/files/var/log/AdGuardHome.log ] || \
+		$(INSTALL_DATA) $(PACKAGE_DIR)/files/var/log/AdGuardHome.log $(1)/var/log/
+	
 	# Install OpenClash core if exists
-	if [ -f $(PKG_BUILD_DIR)/../files/etc/openclash/core/clash_meta ]; then \
-		$(INSTALL_BIN) $(PKG_BUILD_DIR)/../files/etc/openclash/core/clash_meta $(1)/etc/openclash/core/; \
-	fi
+	[ ! -f $(PACKAGE_DIR)/files/etc/openclash/core/clash_meta ] || \
+		$(INSTALL_BIN) $(PACKAGE_DIR)/files/etc/openclash/core/clash_meta $(1)/etc/openclash/core/
+
 endef
 
 $(eval $(call BuildPackage,manus-custom-files))
 EOF
-    log_success "獨立預置文件包 'manus-custom-files' 創建完成 (修復版)。"
+    
+    log_success "獨立預置文件包 'manus-custom-files' 創建完成 (進一步修復版)。"
+    
+    # --- 验证文件是否已正确创建 ---
+    log_info "验证预置文件创建情况："
+    if [ -f "$CUSTOM_FILES_PKG_DIR/files/usr/bin/AdGuardHome" ]; then
+        log_success "✓ AdGuardHome 二进制文件已就位"
+    else
+        log_warning "✗ AdGuardHome 二进制文件缺失"
+    fi
+    
+    if [ -f "$CUSTOM_FILES_PKG_DIR/files/etc/AdGuardHome/AdGuardHome.yaml" ]; then
+        log_success "✓ AdGuardHome 配置文件已就位"
+    else
+        log_warning "✗ AdGuardHome 配置文件缺失"
+    fi
+    
+    if [ -f "$CUSTOM_FILES_PKG_DIR/files/etc/openclash/core/clash_meta" ]; then
+        log_success "✓ OpenClash Meta 核心已就位"
+    else
+        log_warning "✗ OpenClash Meta 核心缺失"
+    fi
 }
 
 exorcise_ghost_plugins() {
